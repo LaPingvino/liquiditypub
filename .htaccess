@@ -1,0 +1,13 @@
+Options -Indexes
+
+RewriteEngine On
+
+# Allow direct access to real files and directories
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+
+# Except install.php — always accessible directly
+RewriteRule ^install\.php$ - [L]
+
+# Route everything else through index.php
+RewriteRule ^(.*)$ index.php [QSA,L]

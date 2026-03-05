@@ -1,0 +1,6 @@
+db/*.sqlite
+db/*.sqlite-wal
+db/*.sqlite-shm
+config.php
+.DS_Store
+*.log
