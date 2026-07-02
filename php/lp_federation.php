@@ -339,6 +339,9 @@ trait FederationTrait
             if (!empty($c['Busy'])) {
                 throw new \RuntimeException('contact busy (§6.3)');
             }
+            if (!empty($c['Diverged'])) {
+                throw new \RuntimeException('contact frozen: checkpoint divergence (§8.3)');
+            }
             $fm = self::localPart($fromMember);
             $led = Ledger::from_records($snap['ledger'] ?? []);
             if ($led->balance(ACCT_MEMBER_PREFIX . $fm) < $src) {
@@ -381,6 +384,9 @@ trait FederationTrait
         }
         if (!empty($c['Busy'])) {
             return $this->rejectTransfer($snap, $env, $tid, 'busy', 'contact has an operation in flight');
+        }
+        if (!empty($c['Diverged'])) {
+            return $this->rejectTransfer($snap, $env, $tid, 'frozen', 'contact frozen: checkpoint divergence (§8.3)');
         }
         if ((int) ($p['op_seq'] ?? -1) !== (int) $c['OpSeq']) {
             return $this->rejectTransfer($snap, $env, $tid, 'stale-pool', 'op_seq mismatch');
@@ -561,6 +567,9 @@ trait FederationTrait
             if (!empty($c['Busy'])) {
                 throw new \RuntimeException('contact busy (§6.3)');
             }
+            if (!empty($c['Diverged'])) {
+                throw new \RuntimeException('contact frozen: checkpoint divergence (§8.3)');
+            }
             if ((int) $c['MyReserveOfPeer'] + $delta < 0) {
                 throw new \RuntimeException('withdrawal exceeds reserve');
             }
@@ -586,6 +595,9 @@ trait FederationTrait
         }
         if (!empty($c['Busy'])) {
             return $this->errorReply($snap, $env, 'busy', 'contact has an operation in flight');
+        }
+        if (!empty($c['Diverged'])) {
+            return $this->errorReply($snap, $env, 'frozen', 'contact frozen: checkpoint divergence (§8.3)');
         }
         if ((int) ($p['op_seq'] ?? -1) !== (int) $c['OpSeq']) {
             return $this->errorReply($snap, $env, 'stale-pool', 'op_seq mismatch');
@@ -636,6 +648,108 @@ trait FederationTrait
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
+
+    // ── expiry (PROTOCOL §7.4) ───────────────────────────────────────────────
+
+    /**
+     * sweepExpired expires every transfer past its `expires` that is still
+     * pre-commit (PROPOSED/ACCEPTED) and releases the contact lock, so a dropped
+     * accept/commit can't pin a contact busy forever. Both sides expire
+     * independently against their own clock and stay consistent because nothing
+     * was committed. Returns how many it closed. Run it from poll.php.
+     */
+    public function sweepExpired(): int
+    {
+        return $this->store->transact(function (array &$snap): int {
+            $now = time();
+            $count = 0;
+            foreach ($snap['transfers'] as &$t) {
+                $st = (string) ($t['State'] ?? '');
+                if ($st !== 'PROPOSED' && $st !== 'ACCEPTED') {
+                    continue;
+                }
+                $exp = strtotime((string) ($t['Expires'] ?? ''));
+                if ($exp === false || $now <= $exp) {
+                    continue;
+                }
+                try {
+                    $t['State'] = self::transition($st, 'expire');
+                } catch (\Throwable $e) {
+                    continue;
+                }
+                $c = &self::contactById($snap, (string) $t['ContactID']);
+                if ($c !== null && ($c['BusyTransfer'] ?? '') === $t['ID']) {
+                    $c['Busy'] = false;
+                    $c['BusyTransfer'] = '';
+                }
+                unset($c);
+                $count++;
+            }
+            unset($t);
+            return $count;
+        });
+    }
+
+    // ── checkpoint reconciliation (PROTOCOL §8.3) ────────────────────────────
+
+    /** reconcilePeer fetches a peer's checkpoint and reconciles the shared contact. */
+    public function reconcilePeer(HttpTransport $t, string $peerBase): array
+    {
+        $cp = $t->fetchCheckpoint($peerBase);
+        if ($cp === null) {
+            return ['compared' => false];
+        }
+        return $this->reconcileAgainst($peerBase, $cp);
+    }
+
+    /**
+     * reconcileAgainst compares a peer's checkpoint to our contact: it prunes
+     * outbox entries the peer has acknowledged (§5.1) and freezes the contact if
+     * the peer's channel root at its op_seq disagrees with our recorded root at
+     * that index (a fork). A peer merely behind but consistent is normal lag.
+     */
+    public function reconcileAgainst(string $peerBase, array $cp): array
+    {
+        return $this->store->transact(function (array &$snap) use ($peerBase, $cp): array {
+            $c = &self::contactByHost($snap, self::hostOf($peerBase));
+            if ($c === null) {
+                return ['compared' => false];
+            }
+            foreach ((array) ($cp['contacts'] ?? []) as $pc) {
+                if ((string) ($pc['contact_id'] ?? '') !== (string) $c['ID']) {
+                    continue;
+                }
+                $peerOpSeq = (int) ($pc['op_seq'] ?? -1);
+                $peerRoot = (string) ($pc['channel_root'] ?? '');
+
+                // Prune acknowledged outbox entries.
+                $pruned = 0;
+                $lastProc = (int) ($pc['last_seq_processed'] ?? 0);
+                if ($lastProc > 0) {
+                    $host = (string) $c['PeerHost'];
+                    $kept = [];
+                    foreach ((array) ($snap['outbox'][$host] ?? []) as $e) {
+                        if ((int) ($e['seq'] ?? 0) <= $lastProc) {
+                            $pruned++;
+                            continue;
+                        }
+                        $kept[] = $e;
+                    }
+                    $snap['outbox'][$host] = $kept;
+                }
+
+                // Divergence at the common op_seq.
+                if ($peerOpSeq >= 0 && $peerOpSeq <= (int) $c['OpSeq']
+                    && isset($c['Roots'][$peerOpSeq]) && $peerRoot !== ''
+                    && $peerRoot !== (string) $c['Roots'][$peerOpSeq]) {
+                    $c['Diverged'] = true;
+                    return ['compared' => true, 'diverged' => true, 'pruned' => $pruned];
+                }
+                return ['compared' => true, 'diverged' => false, 'pruned' => $pruned];
+            }
+            return ['compared' => false];
+        });
+    }
 
     private static function ledgerHead(array $snap): string
     {

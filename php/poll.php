@@ -27,8 +27,17 @@ $node->setTransport(new HttpTransport());
 $node->initKey();
 
 $queue = $cfg['queue_file'] ?? (__DIR__ . '/action-queue.jsonl');
-$drained = $node->drainActionQueue($queue);
-$fed = $node->federate(new HttpTransport(), (array) ($cfg['peers'] ?? []));
+$transport = new HttpTransport();
+$peers = (array) ($cfg['peers'] ?? []);
+
+$expired = $node->sweepExpired();                 // release locks on stale transfers (§7.4)
+$drained = $node->drainActionQueue($queue);       // apply operator intents
+$fed = $node->federate($transport, $peers);       // push+pull to quiescence
+
+$reconciled = [];
+foreach ($peers as $peer) {
+    $reconciled[$peer] = $node->reconcilePeer($transport, $peer); // §8.3
+}
 
 $ranUd = false;
 if (in_array('--ud', $argv, true)) {
@@ -37,7 +46,9 @@ if (in_array('--ud', $argv, true)) {
 }
 
 echo json_encode([
-    'drained'   => $drained,
-    'federated' => $fed,
-    'ran_ud'    => $ranUd,
+    'expired'    => $expired,
+    'drained'    => $drained,
+    'federated'  => $fed,
+    'reconciled' => $reconciled,
+    'ran_ud'     => $ranUd,
 ], JSON_UNESCAPED_SLASHES) . "\n";

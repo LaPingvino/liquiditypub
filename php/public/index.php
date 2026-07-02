@@ -21,7 +21,10 @@ $cfg = is_file(__DIR__ . '/../config.php')
     : require __DIR__ . '/../config.example.php';
 
 $node = new Node(new Store($cfg['state_file']), $cfg);
-$node->setTransport(new \lp\HttpTransport());
+// Short timeout: an inbound push from an unknown-but-bound peer triggers a
+// one-shot identity fetch (§3 TOFU); keep it snappy so a bogus sender can't tie
+// up the request on a slow fetch.
+$node->setTransport(new \lp\HttpTransport(3));
 
 $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';

@@ -99,11 +99,14 @@ try {
     [$c, $b] = http('POST', "$base/lp/inbox", 'not json');
     ok($c === 400, 'POST inbox garbage: 400 malformed');
 
-    // An envelope signed by a key we do not hold => unknown-key (403).
+    // An envelope signed by a key we do not hold => unknown-key (403). The from
+    // points at a closed local port so the node's one-shot identity fetch fails
+    // fast (connection refused) rather than hanging on DNS.
+    $stranger = 'http://127.0.0.1:1';
     $spoof = json_encode([
-        'lp' => '0.2', 'id' => 'urn:uuid:1', 'type' => 'ping', 'from' => 'https://stranger.example',
+        'lp' => '0.2', 'id' => 'urn:uuid:1', 'type' => 'ping', 'from' => $stranger,
         'to' => $base, 'seq' => 1, 'created' => gmdate('c'), 're' => null, 'payload' => new stdClass(),
-        'sig' => ['key' => 'https://stranger.example/.well-known/liquiditypub#nk1', 'alg' => 'ed25519', 'value' => 'AA'],
+        'sig' => ['key' => $stranger . '/.well-known/liquiditypub#nk1', 'alg' => 'ed25519', 'value' => 'AA'],
     ]);
     [$c, $b] = http('POST', "$base/lp/inbox", $spoof);
     ok($c === 403 && ($b['code'] ?? '') === 'unknown-key', 'POST inbox unknown key: 403 unknown-key');

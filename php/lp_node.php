@@ -193,12 +193,14 @@ class Node
         $led = $this->ledgerFrom($snap);
         $contacts = [];
         foreach ($snap['contacts'] ?? [] as $c) {
+            $host = (string) ($c['PeerHost'] ?? '');
             $contacts[] = [
-                'peer'              => (string) ($c['PeerBase'] ?? ''),
-                'contact_id'        => (string) ($c['ID'] ?? ''),
-                'peer_reserve_here' => (int) ($c['MyReserveOfPeer'] ?? 0),
-                'op_seq'            => (int) ($c['OpSeq'] ?? 0),
-                'channel_root'      => self::contactRootB64($c),
+                'peer'               => (string) ($c['PeerBase'] ?? ''),
+                'contact_id'         => (string) ($c['ID'] ?? ''),
+                'peer_reserve_here'  => (int) ($c['MyReserveOfPeer'] ?? 0),
+                'op_seq'             => (int) ($c['OpSeq'] ?? 0),
+                'channel_root'       => self::contactRootB64($c),
+                'last_seq_processed' => (int) ($snap['inbound'][$host]['last_seq'] ?? 0),
             ];
         }
         $cp = [
