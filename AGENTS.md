@@ -50,9 +50,15 @@ This project uses **bd (beads)**, not ad-hoc TODO lists:
 `bd ready --json`, `bd show <id> --json`, `bd update <id> --claim`,
 `bd close <id> --reason "..."`, then `bd dolt push`. Epic: `joop-pbe`.
 
-## Legacy warning
+## Implementations
 
-`index.php`, `install.php`, `src/`, `pages/`, `api/`, `db/schema.sql` at the
-repo root are the **dead v0.1 PHP PoC** (pre-protocol, never worked, kept for
-reference until removed). Do not extend them; do not model anything on them.
-The docs/ and conformance/ trees are the real project.
+- `node/` — the **Go reference node** (Profile A, task joop-eci).
+- `php/` — the **independent PHP node** for cheap shared hosting (task joop-j4y):
+  `lp_core.php`/`lp_ledger.php` (vector-verified protocol core), `lp_store.php`
+  (flock JSON snapshot), `lp_node.php` (read surface, issuance, §4 validation),
+  and `php/web/` (operator dashboard). Run `php php/test_vectors.php` and
+  `php php/test_node.php`.
+
+The dead v0.1 PHP PoC (root `index.php`, `install.php`, `src/`, `pages/`, `api/`,
+`db/schema.sql`) was **removed** once the real PHP implementation landed. If you
+see it referenced anywhere, it's stale.

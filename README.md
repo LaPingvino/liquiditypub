@@ -1,50 +1,77 @@
 # LiquidityPub
 
-**Federated local money system — PHP + SQLite, no framework**
+**A federated libre-currency protocol — Universal Dividend money without a blockchain.**
 
-Each LiquidityPub node runs a community currency with configurable issuance (UBI/dividend).
-Members transact within a node. Nodes federate via a simple signed-message protocol.
+Each community runs a sovereign node with its own currency and its own issuance
+(a Universal Dividend, in the [Relative Theory of Money][trm] lineage). Nodes
+meet at **contact points**: reciprocal reserve wallets that price exchange
+between two currencies like a constant-product market. There is no shared ledger
+and no chain — trust is bilateral, and every node federates only with peers it
+chooses.
 
-## Requirements
+Status: **v0.2-draft**. The protocol and its executable conformance suite are the
+source of truth; two reference implementations are checked against it.
 
-- PHP 8.0+
-- SQLite (via PHP PDO — enabled on most shared hosts)
-- Apache with `mod_rewrite` (or Nginx with try_files equivalent)
+## Repository layout
 
-## Deploy
+| Path | What it is |
+|------|------------|
+| `docs/DESIGN.md` | The concept and the reasoning — settled vs. open questions. |
+| `docs/PROTOCOL.md` | The normative v0.2-draft spec (the contact surface). |
+| `conformance/` | The executable spec: reference arithmetic + `vectors/*.json`. **The source of truth.** |
+| `node/` | **Go reference node** (Profile A) — the single-binary implementation. |
+| `php/` | **Independent PHP node** for cheap shared hosting + an operator dashboard. |
 
-1. Upload all files to your web root
-2. Visit `https://yoursite.com/install.php`
-3. Complete the setup wizard
-4. Share your node URL with potential members
+Two independent implementations is deliberate: because every node is its own
+currency that federates by choice, the protocol must not be captured by one
+codebase. Both are pinned to the same `conformance/vectors/`, so the vectors —
+not either implementation — define correctness.
 
-## File Structure
+## The two rules that shape everything
 
+- **The membrane principle.** The protocol governs only the contact surface
+  (identity, envelopes, contacts, transfers, checkpoints). Node internals are
+  free. Peers never depend on another node's internals.
+- **No floats, ever.** Integers only — money is micro-units (1 unit = 1,000,000
+  micro), weights are micro-weights, growth is ppm. Exact intermediates before
+  flooring.
+
+## Quick start
+
+**Conformance suite (Go):**
 ```
-index.php          Front controller / router
-install.php        First-run setup wizard
-.htaccess          Rewrite rules
-src/               Core PHP classes
-pages/             Page handlers
-api/               Federation API stubs
-db/                Schema SQL (SQLite file created at runtime)
-assets/            CSS
-docs/              Protocol specification
+cd conformance && go test ./...
 ```
 
-## Federation Protocol
+**Go reference node:**
+```
+cd node && go test ./...
+go run ./cmd/lpnode serve -addr 127.0.0.1:8080   # serve one node
+```
 
-See [docs/PROTOCOL.md](docs/PROTOCOL.md) or visit the [GitHub Pages site](https://liquiditypub.github.io/liquiditypub/).
+**PHP node (cheap hosting):**
+```
+php php/test_vectors.php     # PHP core + ledger vs the Go conformance vectors
+php php/test_node.php         # the node layer (store, issuance, read surface, queue)
+php -S 127.0.0.1:8099 -t php/web   # the operator dashboard
+```
+The PHP node needs the `gmp`, `hash`, and (for signing) `sodium` extensions —
+all standard on PHP ≥ 7.2. See `php/README.md` for what's implemented and what's
+next (the federation state machines).
 
-## Verification Checklist
+## Deployment profiles
 
-1. Visit `/install.php` → complete wizard → redirects to `/`
-2. Register two members (Alice, Bob)
-3. `/admin` → trigger manual mint → verify both wallets show balance
-4. Login as Alice → `/pay` → send to Bob → verify ledger balances
-5. Check `/.well-known/liquiditypub` returns valid JSON
-6. Confirm double-entry: sum of all `ledger_entries` = 0
+The protocol supports three deployment shapes (PROTOCOL §12): **A** — an active
+server (Go binary, or the PHP node); **B** — serverless (Cloudflare Pages + D1,
+GAE); **C** — an HTML-only community whose node is operated by a clearing house
+under a delegated key, with the community's own static host as the root of trust.
+
+## Task tracking
+
+Work is tracked in **bd (beads)**, not ad-hoc lists. Epic: `joop-pbe`.
 
 ## License
 
-MIT
+[MIT](LICENSE) © 2026 Joop Kiefte
+
+[trm]: https://en.trm.creationmonetaire.info/
