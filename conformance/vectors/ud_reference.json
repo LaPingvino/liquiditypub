@@ -1,0 +1,26 @@
+{
+  "description": "PROTOCOL §10 reference formula — ud_base = floor(money_supply × c_period_ppm / ud_weight_total); recipient = floor(ud_base × weight / 1000000). Weights are integer micro-weights (standard member = 1000000). Values independently computed (Python).",
+  "cases": [
+    {
+      "name": "identity-doc example node (57 members + weighted fund, 274 ppm/day ≈ 10%/yr)",
+      "money_supply": 123400000000,
+      "c_period_ppm": 274,
+      "ud_weight_total": 60500000,
+      "ud_base": 558869,
+      "recipients": [
+        { "weight": 1000000, "amount": 558869 },
+        { "weight": 2500000, "amount": 1397172 }
+      ]
+    },
+    {
+      "name": "small node, half-weight recipient",
+      "money_supply": 5000000000,
+      "c_period_ppm": 274,
+      "ud_weight_total": 12000000,
+      "ud_base": 114166,
+      "recipients": [
+        { "weight": 500000, "amount": 57083 }
+      ]
+    }
+  ]
+}

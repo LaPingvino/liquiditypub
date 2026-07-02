@@ -5,20 +5,24 @@ layout: default
 
 # LiquidityPub
 
-**Federated local money — open protocol, community currency**
+**Libre currency, federated — Universal Dividend money for local communities, no
+blockchain required**
 
-LiquidityPub lets communities run their own currency nodes that can federate with each other.
-Each node issues its own money via configurable UBI/dividend rules and maintains a double-entry ledger.
+LiquidityPub lets any community run its own currency node: money issued equally to
+every member as a Universal Dividend (in the lineage of the Théorie Relative de la
+Monnaie / Ğ1), kept on a boring, auditable double-entry ledger. Nodes federate
+fediverse-style — signed messages, bilateral trust lines with credit limits, and
+UD-parity exchange between communities — so value moves between currencies with
+bounded, chosen risk.
 
-## Getting Started
+## Documents
 
-- [Protocol Specification v0.1-draft](PROTOCOL.md)
-- [Source Code on GitHub](https://github.com/liquiditypub/liquiditypub)
+- [Design Foundations](DESIGN.md) — the idea, the reasoning, the open questions
+- [Protocol Specification v0.2-draft](PROTOCOL.md) — the normative spec
+- [Source on GitHub](https://github.com/LaPingvino/liquiditypub)
 
-## Quick Deploy
+## Status
 
-1. Upload files to any PHP 8.0+ host
-2. Visit `/install.php` to run the setup wizard
-3. Register members and start transacting
-
-No Composer, no framework, no MySQL — just PHP + SQLite.
+Protocol foundation under active design (July 2026). Proofs of concept planned for
+three deployment profiles: a Go single binary, Cloudflare Pages + D1 (serverless), and
+a fully static git-repo-as-node with CI validation.

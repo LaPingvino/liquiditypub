@@ -1,0 +1,15 @@
+{
+  "description": "PROTOCOL §8.2 — root0 = SHA-256(UTF-8(contact_id)); root_n = SHA-256(root_{n-1} ‖ JCS([op_type, op_id, src_amount, dst_amount])). roots[0] is root0; roots[i+1] follows ops[i]. Hex values independently computed (Python hashlib).",
+  "contact_id": "urn:uuid:00000000-0000-0000-0000-000000000001",
+  "ops": [
+    ["seed", "urn:uuid:00000000-0000-0000-0000-000000000001", 500000000, 1000000000],
+    ["transfer", "urn:uuid:00000000-0000-0000-0000-0000000000aa", 10000000, 19607843],
+    ["adjust", "urn:uuid:00000000-0000-0000-0000-0000000000bb", 250000000, 0]
+  ],
+  "roots": [
+    "a5c7539e631e5422f40ca49f98643d43605dd08e86e24ab425bbcf743e1ff628",
+    "e67537b2b396dd6bf5c339eb1c8edaa974321a46e36ef58da013eeca5872df22",
+    "5781a38114a9b36d07ef8d59c82825eae98f2d5dcc72f1b540ba3bf51679349b",
+    "0361ae0c0fce5c24c5df39b4a687c80683191d40e5552e33514e727e92ee0fae"
+  ]
+}

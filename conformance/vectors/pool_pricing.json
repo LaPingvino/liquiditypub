@@ -1,0 +1,54 @@
+{
+  "description": "PROTOCOL §6.2 — dst = floor(r_dst × src / (r_src + src)), exact intermediates, dst=0 is dust. Values independently computed (Python, arbitrary precision).",
+  "cases": [
+    {
+      "name": "worked example from DESIGN §4d (Riverside→Hilltop 10ʀ)",
+      "r_src": 500000000,
+      "r_dst": 1000000000,
+      "src": 10000000,
+      "dst": 19607843
+    },
+    {
+      "name": "reverse direction",
+      "r_src": 1000000000,
+      "r_dst": 500000000,
+      "src": 6000000,
+      "dst": 2982107
+    },
+    {
+      "name": "dust: 1 micro-unit through balanced pool",
+      "r_src": 1000000,
+      "r_dst": 1000000,
+      "src": 1,
+      "error": "dust"
+    },
+    {
+      "name": "intermediates exceed 2^53 (forces exact math)",
+      "r_src": 9007199254740991,
+      "r_dst": 9007199254740991,
+      "src": 1234567890123,
+      "dst": 1234398697796
+    },
+    {
+      "name": "thin pool, brutal slippage (50%)",
+      "r_src": 10,
+      "r_dst": 1000000,
+      "src": 10,
+      "dst": 500000
+    },
+    {
+      "name": "zero amount rejected",
+      "r_src": 1000000,
+      "r_dst": 1000000,
+      "src": 0,
+      "error": "non-positive"
+    },
+    {
+      "name": "empty pool rejected",
+      "r_src": 0,
+      "r_dst": 1000000,
+      "src": 500,
+      "error": "empty-pool"
+    }
+  ]
+}

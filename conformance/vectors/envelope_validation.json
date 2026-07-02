@@ -1,0 +1,157 @@
+{
+  "description": "PROTOCOL §4 validation order: unknown-key → bad-signature → duplicate → stale-seq → too-old/future → ok. State below is the receiver's channel view at evaluation time.",
+  "keys": {
+    "https://riverside.example/.well-known/liquiditypub#nk1": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg"
+  },
+  "now": "2026-07-02T12:00:00Z",
+  "scenarios": [
+    {
+      "envelope": {
+        "created": "2026-07-02T11:59:00Z",
+        "from": "https://riverside.example",
+        "id": "urn:uuid:33333333-3333-3333-3333-333333333301",
+        "lp": "0.2",
+        "payload": {},
+        "re": null,
+        "seq": 6,
+        "sig": {
+          "alg": "ed25519",
+          "key": "https://riverside.example/.well-known/liquiditypub#nk1",
+          "value": "cPMtp5y_azxRMZVGqMx1T4Wv6gZMvLbeoMhyGNODSj8wTbdoOCx9mTBWWucs-JH4WkBhLrlVV8PsO4rHd3ZbCw"
+        },
+        "to": "https://hilltop.example",
+        "type": "ping"
+      },
+      "expect": "ok",
+      "name": "valid message"
+    },
+    {
+      "envelope": {
+        "created": "2026-07-02T12:00:00Z",
+        "from": "https://riverside.example",
+        "id": "urn:uuid:22222222-2222-2222-2222-22222222bad1",
+        "lp": "0.2",
+        "payload": {
+          "tampered": true
+        },
+        "re": null,
+        "seq": 6,
+        "sig": {
+          "alg": "ed25519",
+          "key": "https://riverside.example/.well-known/liquiditypub#nk1",
+          "value": "9tffKrvwGnTV6vLlJM20SGnRW-IVLen2zlfj7v6ZY2tBjUSWj5spGKpudstF2-IcJONxZGNQ6y-vGemnxCZQCA"
+        },
+        "to": "https://hilltop.example",
+        "type": "ping"
+      },
+      "expect": "bad-signature",
+      "name": "payload tampered after signing"
+    },
+    {
+      "envelope": {
+        "created": "2026-07-02T12:00:00Z",
+        "from": "https://riverside.example",
+        "id": "urn:uuid:22222222-2222-2222-2222-22222222bad2",
+        "lp": "0.2",
+        "payload": {},
+        "re": null,
+        "seq": 6,
+        "sig": {
+          "alg": "ed25519",
+          "key": "https://riverside.example/.well-known/liquiditypub#nk9",
+          "value": "3u3LeXG6ocGFpQXqE-btlCoyvb8S87Kh5qPM29MgujYPcFpStHawvCipK41cxGdmA46z5bfzkGgFxgfUY6uSDw"
+        },
+        "to": "https://hilltop.example",
+        "type": "ping"
+      },
+      "expect": "unknown-key",
+      "name": "unknown key id"
+    },
+    {
+      "envelope": {
+        "created": "2026-07-02T12:00:00Z",
+        "from": "https://riverside.example",
+        "id": "urn:uuid:33333333-3333-3333-3333-333333333300",
+        "lp": "0.2",
+        "payload": {},
+        "re": null,
+        "seq": 7,
+        "sig": {
+          "alg": "ed25519",
+          "key": "https://riverside.example/.well-known/liquiditypub#nk1",
+          "value": "6i_xKEvw_-IqdtWVp0sAos2GL2-jTFWtYOFPEmInKz2y42of9lflsAu0Oqu3rOG4-piP_61vv2OsJn67l42hBg"
+        },
+        "to": "https://hilltop.example",
+        "type": "ping"
+      },
+      "expect": "duplicate",
+      "name": "replayed id"
+    },
+    {
+      "envelope": {
+        "created": "2026-07-02T12:00:00Z",
+        "from": "https://riverside.example",
+        "id": "urn:uuid:33333333-3333-3333-3333-333333333302",
+        "lp": "0.2",
+        "payload": {},
+        "re": null,
+        "seq": 5,
+        "sig": {
+          "alg": "ed25519",
+          "key": "https://riverside.example/.well-known/liquiditypub#nk1",
+          "value": "eTws2Ax3LSVEjnXniZyfc24g_HiYxWN1eqd58wEvffOtFEL52iq7HVjHPVF4oCGPkamvgZHw8vEgfuTS2jzKBw"
+        },
+        "to": "https://hilltop.example",
+        "type": "ping"
+      },
+      "expect": "stale-seq",
+      "name": "stale seq"
+    },
+    {
+      "envelope": {
+        "created": "2026-06-24T12:00:00Z",
+        "from": "https://riverside.example",
+        "id": "urn:uuid:33333333-3333-3333-3333-333333333303",
+        "lp": "0.2",
+        "payload": {},
+        "re": null,
+        "seq": 6,
+        "sig": {
+          "alg": "ed25519",
+          "key": "https://riverside.example/.well-known/liquiditypub#nk1",
+          "value": "2_e51ftLAeCbEsD5e11WK9QqQPfLjrXhjK9spEzrdNgFgbw7J6QtBjtjyfAGGgoX051bICxYVJ8UcZwDZGmXBA"
+        },
+        "to": "https://hilltop.example",
+        "type": "ping"
+      },
+      "expect": "too-old",
+      "name": "older than 7 days"
+    },
+    {
+      "envelope": {
+        "created": "2026-07-02T13:30:00Z",
+        "from": "https://riverside.example",
+        "id": "urn:uuid:33333333-3333-3333-3333-333333333304",
+        "lp": "0.2",
+        "payload": {},
+        "re": null,
+        "seq": 6,
+        "sig": {
+          "alg": "ed25519",
+          "key": "https://riverside.example/.well-known/liquiditypub#nk1",
+          "value": "2b8rZ7ULXYSknvyWm0atS7KJgY50o2UxcaMB52k92kLGroEzvW--gzSghi3CtV8ydLnbica6W903JLXeROKECA"
+        },
+        "to": "https://hilltop.example",
+        "type": "ping"
+      },
+      "expect": "future",
+      "name": "more than 1h in the future"
+    }
+  ],
+  "state": {
+    "last_seq": 5,
+    "seen_ids": [
+      "urn:uuid:33333333-3333-3333-3333-333333333300"
+    ]
+  }
+}

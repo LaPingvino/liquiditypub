@@ -1,0 +1,26 @@
+{
+  "description": "PROTOCOL §7.1 transfer state machine. 'to' = expected next state; 'invalid': true = the (state, event) pair must be rejected. Duplicate commits on COMMITTED/SETTLED are idempotent; no expiry after commit; abort only before commit.",
+  "transitions": [
+    { "from": "NONE", "event": "propose", "to": "PROPOSED" },
+    { "from": "PROPOSED", "event": "accept", "to": "ACCEPTED" },
+    { "from": "PROPOSED", "event": "reject", "to": "REJECTED" },
+    { "from": "PROPOSED", "event": "abort", "to": "ABORTED" },
+    { "from": "PROPOSED", "event": "expire", "to": "EXPIRED" },
+    { "from": "PROPOSED", "event": "commit", "invalid": true },
+    { "from": "PROPOSED", "event": "receipt", "invalid": true },
+    { "from": "ACCEPTED", "event": "commit", "to": "COMMITTED" },
+    { "from": "ACCEPTED", "event": "abort", "to": "ABORTED" },
+    { "from": "ACCEPTED", "event": "expire", "to": "EXPIRED" },
+    { "from": "ACCEPTED", "event": "accept", "invalid": true },
+    { "from": "ACCEPTED", "event": "receipt", "invalid": true },
+    { "from": "COMMITTED", "event": "receipt", "to": "SETTLED" },
+    { "from": "COMMITTED", "event": "commit", "to": "COMMITTED" },
+    { "from": "COMMITTED", "event": "abort", "invalid": true },
+    { "from": "COMMITTED", "event": "expire", "invalid": true },
+    { "from": "SETTLED", "event": "commit", "to": "SETTLED" },
+    { "from": "SETTLED", "event": "receipt", "invalid": true },
+    { "from": "REJECTED", "event": "commit", "invalid": true },
+    { "from": "ABORTED", "event": "commit", "invalid": true },
+    { "from": "EXPIRED", "event": "commit", "invalid": true }
+  ]
+}
