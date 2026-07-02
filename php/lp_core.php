@@ -17,6 +17,9 @@ declare(strict_types=1);
 
 namespace lp;
 
+// Fixed log page size (§9.2), mirrors the Go /lp/log paging.
+const LP_PAGE_SIZE = 100;
+
 // ── Canonical JSON (RFC 8785 / JCS profile, PROTOCOL §2) ─────────────────────
 //
 // Mirrors conformance/reference.go writeCanonical exactly: object keys sorted by
