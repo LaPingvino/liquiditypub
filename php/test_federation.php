@@ -145,6 +145,38 @@ $env['from'] = $baseA;
 $res = $B->processInbound($env, false);
 ok($res['verdict'] === 'bad-signature', 'security: tampered payload => bad-signature (got ' . $res['verdict'] . ')');
 
+// ── member.lookup (§11): answered only over an active contact ────────────────
+$look = $A->lookupMember($baseB, 'bob@hilltop.example');
+$r = $B->processInbound($look, false);
+ok(($r['reply']['type'] ?? '') === 'member.result' && ($r['reply']['payload']['found'] ?? null) === true,
+    'member.lookup: existing member found on peer');
+$look2 = $A->lookupMember($baseB, 'ghost@hilltop.example');
+$r2 = $B->processInbound($look2, false);
+ok(($r2['reply']['payload']['found'] ?? null) === false, 'member.lookup: unknown member not found');
+
+// ── key rotation (§3): announce to peers, activate, peer registers new key ────
+$oldKeyId = $A->activeKeyId();
+$newLocal = $A->rotateKey();
+$newKeyId = $A->activeKeyId();
+ok($newKeyId !== $oldKeyId && strpos($newKeyId, $newLocal) !== false, 'rotate: active key switched');
+foreach ($A->outboxFor('hilltop.example') as $env) {
+    if (($env['type'] ?? '') === 'key.announce') {
+        exchange($nodes, $env);
+    }
+}
+$snapB = $B->store()->load();
+ok(isset($snapB['peer_keys'][$newKeyId]), 'rotate: peer registered the announced new key');
+// an op signed by the NEW key still verifies at B
+exchange($nodes, $A->adjustReserve($baseB, 1000000, 'post-rotation'));
+$cbAfter = contact($B, 'riverside.example');
+ok((int) $cbAfter['OpSeq'] === 3, 'rotate: peer accepts an op signed by the rotated key');
+
+// ── contact.close (§6): both sides freeze ────────────────────────────────────
+exchange($nodes, $A->closeContact($baseB, 'wrapping up'));
+$caC = contact($A, 'hilltop.example');
+$cbC = contact($B, 'riverside.example');
+ok(!empty($caC['Closed']) && !empty($cbC['Closed']), 'close: both sides marked closed');
+
 // ── cleanup ──────────────────────────────────────────────────────────────────
 array_map('unlink', glob("$dir/*") ?: []);
 @rmdir($dir);

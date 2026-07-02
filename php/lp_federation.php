@@ -207,6 +207,11 @@ trait FederationTrait
             case 'transfer.abort':   return $this->hTransferAbort($snap, $env);
             case 'reserve.adjust':   return $this->hReserveAdjust($snap, $env);
             case 'reserve.accept':   return $this->hReserveAccept($snap, $env);
+            case 'contact.close':    return $this->hContactClose($snap, $env);
+            case 'contact.update':   return $this->hContactUpdate($snap, $env);
+            case 'key.announce':     return $this->hKeyAnnounce($snap, $env);
+            case 'member.lookup':    return $this->hMemberLookup($snap, $env);
+            case 'member.result':    return null;
             case 'ping':             return $this->buildSigned($snap, 'pong', (string) $env['from'], (string) $env['id'], []);
             case 'pong':             return null;
             default:                 return $this->errorReply($snap, $env, 'unknown-type', (string) ($env['type'] ?? ''));
@@ -648,6 +653,113 @@ trait FederationTrait
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
+
+    // ── contact close/update, lookup, key announce (PROTOCOL §6, §11, §3) ────
+
+    /** closeContact freezes new operations on a contact and notifies the peer (§6). */
+    public function closeContact(string $peerBase, string $note = ''): ?array
+    {
+        return $this->store->transact(function (array &$snap) use ($peerBase, $note): array {
+            $c = &self::contactByHost($snap, self::hostOf($peerBase));
+            if ($c === null) {
+                throw new \RuntimeException('no contact with ' . self::hostOf($peerBase));
+            }
+            $c['Closed'] = true;
+            return $this->buildSigned($snap, 'contact.close', $peerBase, '',
+                ['contact_id' => (string) $c['ID'], 'note' => $note]);
+        });
+    }
+
+    private function hContactClose(array &$snap, array $env): ?array
+    {
+        $c = &self::contactByHost($snap, self::hostOf((string) $env['from']));
+        if ($c !== null) {
+            $c['Closed'] = true;
+        }
+        return null;
+    }
+
+    private function hContactUpdate(array &$snap, array $env): ?array
+    {
+        // Informational (§6): actual reserve changes go through reserve.adjust, so
+        // we acknowledge by accepting the envelope and make no state change.
+        $c = &self::contactByHost($snap, self::hostOf((string) $env['from']));
+        if ($c === null) {
+            return $this->errorReply($snap, $env, 'unknown-contact', 'no contact');
+        }
+        return null;
+    }
+
+    private function hKeyAnnounce(array &$snap, array $env): ?array
+    {
+        // The envelope was already verified against a currently-valid key of
+        // `from` (§3), so registering the announced key is safe.
+        $p = (array) ($env['payload'] ?? []);
+        $localId = (string) ($p['id'] ?? '');
+        $pub = (string) ($p['public_key'] ?? '');
+        if ($localId === '' || $pub === '') {
+            return $this->errorReply($snap, $env, 'malformed', 'missing key id or public_key');
+        }
+        $snap['peer_keys'][(string) $env['from'] . LP_IDENTITY_PATH . $localId] = $pub;
+        return null;
+    }
+
+    private function hMemberLookup(array &$snap, array $env): array
+    {
+        // Only answer over an active contact (§11).
+        $c = &self::contactByHost($snap, self::hostOf((string) $env['from']));
+        if ($c === null || empty($c['Active'])) {
+            return $this->errorReply($snap, $env, 'no-contact', 'lookups require an active contact');
+        }
+        $p = (array) ($env['payload'] ?? []);
+        $member = (string) ($p['member'] ?? '');
+        $local = self::localPart($member);
+        $actives = self::activeMembers($snap);
+        $found = isset($actives[$local]);
+        $res = ['member' => $member, 'found' => $found];
+        if ($found && ($this->cfg['transparency'] ?? '') === 'public' && !empty($actives[$local]['DisplayName'])) {
+            $res['display_name'] = (string) $actives[$local]['DisplayName'];
+        }
+        return $this->buildSigned($snap, 'member.result', (string) $env['from'], (string) $env['id'], $res);
+    }
+
+    /** lookupMember asks a peer whether an address exists there (§11). */
+    public function lookupMember(string $peerBase, string $member): ?array
+    {
+        return $this->store->transact(function (array &$snap) use ($peerBase, $member): array {
+            return $this->buildSigned($snap, 'member.lookup', $peerBase, '', ['member' => $member]);
+        });
+    }
+
+    /**
+     * rotateKey generates a new signing key, announces it to every open contact
+     * signed by the CURRENT key, then activates it (§3). The old key stays valid
+     * (and listed) until revoked. Returns the new local id.
+     */
+    public function rotateKey(): string
+    {
+        if (!have_sodium()) {
+            throw new \RuntimeException('key rotation requires the sodium extension');
+        }
+        return $this->store->transact(function (array &$snap): string {
+            $seed = random_bytes(32);
+            $kp = \sodium_crypto_sign_seed_keypair($seed);
+            $pub = b64url(\sodium_crypto_sign_publickey($kp));
+            $newLocal = '#nk' . (count($snap['own_keys']) + 1);
+            $now = gmdate('c');
+            // Announce first — buildSigned signs with the still-active old key.
+            foreach ($snap['contacts'] as $c) {
+                if (!empty($c['Closed'])) {
+                    continue;
+                }
+                $this->buildSigned($snap, 'key.announce', (string) $c['PeerBase'], '',
+                    ['id' => $newLocal, 'alg' => 'ed25519', 'public_key' => $pub, 'created' => $now]);
+            }
+            $snap['own_keys'][] = ['local_id' => $newLocal, 'seed' => b64url($seed), 'created' => $now, 'revoked' => ''];
+            $snap['active_key'] = $newLocal;
+            return $newLocal;
+        });
+    }
 
     // ── expiry (PROTOCOL §7.4) ───────────────────────────────────────────────
 
