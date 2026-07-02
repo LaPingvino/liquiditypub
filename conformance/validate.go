@@ -3,6 +3,7 @@ package conformance
 import (
 	"crypto/ed25519"
 	"encoding/base64"
+	"strings"
 	"time"
 )
 
@@ -44,8 +45,13 @@ func ValidateEnvelope(env map[string]any, st ValidationState) string {
 		return VerdictMalformed
 	}
 	keyID, _ := sig["key"].(string)
+	from, _ := env["from"].(string)
 	pub, ok := st.Keys[keyID]
-	if !ok {
+	if !ok || !keyBoundToSender(keyID, from) {
+		// The key must be one *published by `from`*, not merely any key we hold.
+		// Without the sender binding, a peer whose key we already trust could sign
+		// an envelope that claims to originate from a different node and have it
+		// accepted, then acted on under the spoofed identity (§4 step 1, §13).
 		return VerdictUnknownKey
 	}
 	sigVal, _ := sig["value"].(string)
@@ -83,6 +89,18 @@ func ValidateEnvelope(env map[string]any, st ValidationState) string {
 		return VerdictFuture
 	}
 	return VerdictOK
+}
+
+// keyBoundToSender enforces that sig.key belongs to the claimed sender: a key id
+// is `<from><identity-path>#<local>` (§4), so it must begin with the sender's
+// origin followed by the path separator. Requiring the next byte to be '/' stops
+// prefix confusion (e.g. from "https://a.com" matching a key of
+// "https://a.com.evil/…").
+func keyBoundToSender(keyID, from string) bool {
+	if from == "" || len(keyID) <= len(from) {
+		return false
+	}
+	return strings.HasPrefix(keyID, from) && keyID[len(from)] == '/'
 }
 
 func envInt(env map[string]any, key string) (int64, bool) {

@@ -177,9 +177,14 @@ func (n *Node) RefreshPeerKeys(peerBase string) (added, removed int, err error) 
 		}
 	}
 	for kid, pub := range valid {
-		if _, ok := n.peerKeys[kid]; !ok {
+		if existing, ok := n.peerKeys[kid]; !ok {
 			n.peerKeys[kid] = pub
 			added++
+		} else if !existing.Equal(pub) {
+			// The id is known but the material differs from the peer's current
+			// document — overwrite, so a previously poisoned key is corrected
+			// rather than left sticky.
+			n.peerKeys[kid] = pub
 		}
 	}
 	if added > 0 || removed > 0 {

@@ -181,15 +181,26 @@ func (n *Node) handleTransferAccept(env map[string]any) map[string]any {
 	if t == nil || !t.Outgoing {
 		return n.errorReply(env, "unknown-transfer", "no matching outgoing transfer")
 	}
+	c := n.senderContact(env, t.ContactID)
+	if c == nil {
+		return n.errorReply(env, "wrong-sender", "transfer does not belong to sender")
+	}
 	if t.State == "COMMITTED" || t.State == "SETTLED" {
 		return nil // idempotent: already committed
+	}
+	// A transfer whose expiry has passed must never commit: the payee may have
+	// already expired its side (§7.4), and committing here would append our leg
+	// with no counterpart, destroying money one-sidedly. Expire and notify.
+	if n.expireIfDueLocked(t, n.clock()) {
+		return n.buildSigned("transfer.abort", c.PeerBase, envStr(env, "id"), map[string]any{
+			"transfer_id": t.ID,
+		})
 	}
 	next, err := conformance.Transition(t.State, "accept")
 	if err != nil {
 		return n.errorReply(env, "bad-state", err.Error())
 	}
 	t.State = next
-	c := n.contacts[t.ContactID]
 	rec, err := n.led.Append(ledger.Tx{
 		ID:      newID(),
 		Type:    ledger.TxTransferOut,
@@ -225,6 +236,10 @@ func (n *Node) handleTransferCommit(env map[string]any) map[string]any {
 	if t == nil || t.Outgoing {
 		return n.errorReply(env, "unknown-transfer", "no matching incoming transfer")
 	}
+	c := n.senderContact(env, t.ContactID)
+	if c == nil {
+		return n.errorReply(env, "wrong-sender", "transfer does not belong to sender")
+	}
 	if t.State == "SETTLED" || t.State == "COMMITTED" {
 		return t.Receipt // idempotent retry: same receipt, no re-apply
 	}
@@ -233,7 +248,6 @@ func (n *Node) handleTransferCommit(env map[string]any) map[string]any {
 		return n.errorReply(env, "bad-state", err.Error())
 	}
 	t.State = next
-	c := n.contacts[t.ContactID]
 	if pe, ok := p["entry"].(map[string]any); ok {
 		ls, _ := pInt(pe, "log_seq")
 		t.PeerEntry = &entryProof{LogSeq: ls, LogHash: pStr(pe, "log_hash")}
@@ -273,6 +287,10 @@ func (n *Node) handleTransferReceipt(env map[string]any) map[string]any {
 	if t == nil || !t.Outgoing {
 		return n.errorReply(env, "unknown-transfer", "no matching outgoing transfer")
 	}
+	c := n.senderContact(env, t.ContactID)
+	if c == nil {
+		return n.errorReply(env, "wrong-sender", "transfer does not belong to sender")
+	}
 	if t.State == "SETTLED" {
 		return nil
 	}
@@ -285,7 +303,7 @@ func (n *Node) handleTransferReceipt(env map[string]any) map[string]any {
 		ls, _ := pInt(pe, "log_seq")
 		t.PeerEntry = &entryProof{LogSeq: ls, LogHash: pStr(pe, "log_hash")}
 	}
-	if c := n.contacts[t.ContactID]; c != nil {
+	if c.BusyTransfer == t.ID {
 		c.Busy, c.BusyTransfer = false, ""
 	}
 	return nil

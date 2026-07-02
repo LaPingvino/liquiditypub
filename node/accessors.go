@@ -70,6 +70,16 @@ func (n *Node) Balance(account string) int64 {
 // Transparency returns the node's transparency level (§9.3).
 func (n *Node) Transparency() string { return n.cfg.Transparency }
 
+// AdminAuthorized reports whether a bearer token authorizes an admin request.
+// An empty configured token means the admin API is ungated (demo default).
+func (n *Node) AdminAuthorized(bearer string) bool {
+	if n.cfg.AdminToken == "" {
+		return true
+	}
+	const p = "Bearer "
+	return len(bearer) > len(p) && bearer[:len(p)] == p && bearer[len(p):] == n.cfg.AdminToken
+}
+
 // IsActivePeer reports whether the given base URL or host is an active,
 // non-closed contact peer — used to gate "peers"-level log access (§9.3).
 func (n *Node) IsActivePeer(peerBaseOrHost string) bool {

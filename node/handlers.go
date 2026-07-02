@@ -3,6 +3,7 @@ package lpnode
 import (
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/LaPingvino/liquiditypub/conformance"
@@ -11,52 +12,121 @@ import (
 // Start launches the delivery worker. Call once before federating.
 func (n *Node) Start() {
 	n.mu.Lock()
-	if n.deliveries == nil {
-		n.deliveries = make(chan qitem, 1024)
-		go n.deliverLoop()
+	if n.pushSig == nil {
+		n.pushSig = make(chan struct{}, 1)
+		go n.pushWorker()
 	}
 	n.mu.Unlock()
+	n.wakePush()
 }
 
-type qitem struct {
-	to  string
-	env map[string]any
-}
-
-func (n *Node) deliverLoop() {
-	for it := range n.deliveries {
+// pushWorker delivers each peer's outbox to it, in seq order, stopping at the
+// first failure so a transient error is retried on the next wake rather than
+// letting a later seq overtake it (which the receiver would reject as stale and
+// pruning would then drop). A periodic tick retries anything a failure left
+// behind even absent new traffic; the pull baseline is the ultimate backstop.
+func (n *Node) pushWorker() {
+	t := time.NewTicker(3 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-n.pushSig:
+		case <-t.C:
+		}
 		s := n.sender()
 		if s == nil {
-			log.Printf("%s: no sender; dropping %v to %s", n.cfg.Base, it.env["type"], it.to)
 			continue
 		}
-		if err := s.Deliver(it.to, it.env); err != nil {
-			log.Printf("%s: deliver %v to %s: %v", n.cfg.Base, it.env["type"], it.to, err)
+		n.mu.Lock()
+		hosts := make([]string, 0, len(n.outbox))
+		for h := range n.outbox {
+			hosts = append(hosts, h)
+		}
+		n.mu.Unlock()
+		for _, h := range hosts {
+			n.pushHost(s, h)
 		}
 	}
 }
 
-// dispatch enqueues an outbound envelope for ordered, in-process delivery. The
-// single worker preserves per-channel ordering, which the receiver's seq check
-// depends on. Must be called with n.mu released.
+// pushHost delivers the not-yet-acknowledged outbox entries for one peer in
+// ascending seq order, advancing the per-peer cursor only on a successful send
+// and stopping at the first failure. Idempotent: the cursor is in-memory, so a
+// restart re-pushes and the receiver dedups by id.
+func (n *Node) pushHost(s Sender, host string) {
+	for {
+		n.mu.Lock()
+		var env map[string]any
+		var seq int64
+		var base string
+		for _, e := range n.outbox[host] {
+			if sq, ok := asInt(e["seq"]); ok && sq > n.pushed[host] {
+				env, seq, base = e, sq, envStr(e, "to")
+				break
+			}
+		}
+		n.mu.Unlock()
+		if env == nil {
+			return
+		}
+		if err := s.Deliver(base, env); err != nil {
+			log.Printf("%s: deliver %v to %s (seq %d): %v — will retry", n.cfg.Base, env["type"], host, seq, err)
+			return
+		}
+		n.mu.Lock()
+		if seq > n.pushed[host] {
+			n.pushed[host] = seq
+		}
+		n.mu.Unlock()
+	}
+}
+
+// wakePush nudges the push worker without blocking (the signal channel coalesces
+// wakeups). Safe to call with or without n.mu held.
+func (n *Node) wakePush() {
+	select {
+	case n.pushSig <- struct{}{}:
+	default:
+	}
+}
+
+// dispatch signals the push worker that peer `to` has new outbox entries. The
+// envelope is already durably recorded in the outbox by buildSigned (the `env`
+// argument is that same envelope, kept for call-site clarity), so delivery reads
+// from the outbox in seq order rather than trusting enqueue order. Must be called
+// with n.mu released.
 func (n *Node) dispatch(to string, env map[string]any) {
+	n.wakePush()
+}
+
+// directDeliver sends one envelope out-of-band, bypassing the seq cursor. Used
+// only to re-answer a duplicate request with its cached reply: the receiver
+// dedups by id, so reordering this single resend is harmless.
+func (n *Node) directDeliver(to string, env map[string]any) {
 	if env == nil {
 		return
 	}
-	n.mu.Lock()
-	ch := n.deliveries
-	n.mu.Unlock()
-	if ch == nil {
-		log.Printf("%s: dispatch before Start(); dropping", n.cfg.Base)
-		return
-	}
-	ch <- qitem{to: to, env: env}
+	go func() {
+		if s := n.sender(); s != nil {
+			_ = s.Deliver(to, env)
+		}
+	}()
 }
 
 // ProcessInbound validates and handles one inbound envelope (§4), dispatching
 // any reply. It returns the validation verdict; the HTTP layer maps a non-ok
 // verdict to 400/403. Delivery success is irrelevant to correctness.
 func (n *Node) ProcessInbound(env map[string]any) string {
+	// §14: reject an envelope whose major version we do not implement, before any
+	// signature work — its shape is not guaranteed to match what we verify.
+	if major, _, _ := strings.Cut(envStr(env, "lp"), "."); major != "0" {
+		return conformance.VerdictMalformed
+	}
+	// §4: an envelope must be addressed to us. Compare hosts so scheme/trailing
+	// differences don't matter.
+	if to := envStr(env, "to"); to != "" && host(to) != host(n.cfg.Base) {
+		return conformance.VerdictMalformed
+	}
 	fromBase := envStr(env, "from")
 	sig, _ := env["sig"].(map[string]any)
 	keyid, _ := sig["key"].(string)
@@ -81,7 +151,10 @@ func (n *Node) ProcessInbound(env map[string]any) string {
 		reply := ci.replies[envStr(env, "id")]
 		n.mu.Unlock()
 		if reply != nil {
-			n.dispatch(envStr(reply, "to"), reply)
+			// The peer retried a request it never saw our answer to; resend the
+			// cached reply directly (bypassing the seq cursor, which already
+			// counts it as delivered).
+			n.directDeliver(envStr(reply, "to"), reply)
 		}
 		return verdict
 	}
@@ -153,6 +226,20 @@ func (n *Node) route(env map[string]any) map[string]any {
 	}
 }
 
+// senderContact resolves the contact referenced by contactID *and* verifies the
+// authenticated envelope sender is that contact's peer. ValidateEnvelope has
+// already bound env["from"] to a key the sender published (see keyBoundToSender),
+// so this is a real authorization check: a peer may only drive operations on its
+// own contact, never a transfer/contact whose opaque id it merely learned (§7,
+// §13). Returns nil when the sender does not own the object. Caller holds n.mu.
+func (n *Node) senderContact(env map[string]any, contactID string) *Contact {
+	c := n.contacts[contactID]
+	if c == nil || c.PeerHost != host(envStr(env, "from")) {
+		return nil
+	}
+	return c
+}
+
 func (n *Node) inbound(fromHost string) *channelInbound {
 	ci := n.inState[fromHost]
 	if ci == nil {
@@ -221,9 +308,13 @@ func (n *Node) handleTransferReject(env map[string]any) map[string]any {
 	if t == nil || !t.Outgoing {
 		return nil
 	}
+	c := n.senderContact(env, t.ContactID)
+	if c == nil {
+		return nil // not the counterparty: ignore, never touch the state machine
+	}
 	if next, err := conformance.Transition(t.State, "reject"); err == nil {
 		t.State = next
-		if c := n.contacts[t.ContactID]; c != nil && c.BusyTransfer == t.ID {
+		if c.BusyTransfer == t.ID {
 			c.Busy, c.BusyTransfer = false, ""
 		}
 	}
@@ -236,9 +327,13 @@ func (n *Node) handleTransferAbort(env map[string]any) map[string]any {
 	if t == nil || t.Outgoing {
 		return nil
 	}
+	c := n.senderContact(env, t.ContactID)
+	if c == nil {
+		return nil // not the counterparty: ignore, never touch the state machine
+	}
 	if next, err := conformance.Transition(t.State, "abort"); err == nil {
 		t.State = next
-		if c := n.contacts[t.ContactID]; c != nil && c.BusyTransfer == t.ID {
+		if c.BusyTransfer == t.ID {
 			c.Busy, c.BusyTransfer = false, ""
 		}
 	}

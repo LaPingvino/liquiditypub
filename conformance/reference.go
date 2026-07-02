@@ -170,7 +170,9 @@ func PoolPrice(rSrc, rDst, src int64) (int64, error) {
 		return 0, ErrEmptyPool
 	}
 	num := new(big.Int).Mul(big.NewInt(rDst), big.NewInt(src))
-	den := big.NewInt(rSrc + src)
+	// Add in big.Int so a near-int64-max (rSrc + src) can't overflow before the
+	// exact-arithmetic division (§6.2 requires exact intermediates).
+	den := new(big.Int).Add(big.NewInt(rSrc), big.NewInt(src))
 	dst := num.Quo(num, den)
 	if dst.Sign() == 0 {
 		return 0, ErrDust

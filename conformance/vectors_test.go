@@ -82,8 +82,8 @@ func TestPoolPricingVectors(t *testing.T) {
 
 func TestChannelHashVectors(t *testing.T) {
 	var v struct {
-		ContactID string  `json:"contact_id"`
-		Ops       [][]any `json:"ops"`
+		ContactID string   `json:"contact_id"`
+		Ops       [][]any  `json:"ops"`
 		Roots     []string `json:"roots"`
 	}
 	loadVectors(t, "channel_hash.json", &v)

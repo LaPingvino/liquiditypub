@@ -51,7 +51,19 @@ func (f *File) Save(data []byte) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, f.Path)
+	if err := os.Rename(tmpName, f.Path); err != nil {
+		return err
+	}
+	// fsync the directory so the rename itself is durable: without this a power
+	// loss can lose the rename even though the temp file's bytes were synced,
+	// silently rolling the snapshot back to the previous version.
+	d, err := os.Open(dir)
+	if err != nil {
+		return nil // best effort: the data is written; only rename durability is at risk
+	}
+	defer d.Close()
+	_ = d.Sync()
+	return nil
 }
 
 func (f *File) Load() ([]byte, error) {

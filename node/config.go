@@ -53,6 +53,12 @@ type Config struct {
 
 	Members []MemberConfig
 
+	// AdminToken gates the out-of-protocol /admin API. When non-empty, mutating
+	// admin requests must present it as `Authorization: Bearer <token>`. Empty
+	// (the default) leaves the demo API open — acceptable only on a trusted
+	// loopback bind.
+	AdminToken string
+
 	// PrivKey is the node signing key. If nil, NewNode generates one.
 	PrivKey ed25519.PrivateKey
 }

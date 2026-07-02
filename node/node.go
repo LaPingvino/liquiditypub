@@ -82,12 +82,13 @@ type Node struct {
 
 	// Per-peer outbox: ordered envelopes addressed to that peer (§5.1).
 	outbox map[string][]map[string]any // peer host -> envelopes
+	pushed map[string]int64            // peer host -> highest seq successfully pushed
 
 	currentUD int64 // last published standard-weight dividend
 
-	send       Sender
-	deliveries chan qitem  // ordered outbound delivery queue (nil until Start)
-	store      store.Store // persistence backend (nil = no durability)
+	send    Sender
+	pushSig chan struct{} // coalescing wakeup for the push worker (nil until Start)
+	store   store.Store   // persistence backend (nil = no durability)
 }
 
 type channelInbound struct {
@@ -131,6 +132,7 @@ func NewNode(cfg Config) (*Node, error) {
 		inState:       map[string]*channelInbound{},
 		peerKeys:      map[string]ed25519.PublicKey{},
 		outbox:        map[string][]map[string]any{},
+		pushed:        map[string]int64{},
 	}
 	n.created = n.clock().Format(time.RFC3339)
 

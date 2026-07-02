@@ -84,6 +84,14 @@ func (n *Node) handleReserveAdjust(env map[string]any) map[string]any {
 	if !ok || delta == 0 {
 		return n.errorReply(env, "malformed", "invalid my_delta")
 	}
+	if c.AppliedAdjusts[adjustID] {
+		// Already mirrored under a previous envelope id: re-acknowledge without
+		// re-applying so the proposer can recover a lost accept idempotently.
+		return n.buildSigned("reserve.accept", c.PeerBase, envStr(env, "id"), map[string]any{
+			"contact_id": c.ID,
+			"adjust_id":  adjustID,
+		})
+	}
 	if c.PeerReserveOfMe+delta < 0 {
 		return n.errorReply(env, "insufficient-reserve", "withdrawal exceeds mirrored reserve")
 	}
@@ -91,6 +99,10 @@ func (n *Node) handleReserveAdjust(env map[string]any) map[string]any {
 	if err := c.applyAdjust(adjustID, delta); err != nil {
 		return n.errorReply(env, "internal", err.Error())
 	}
+	if c.AppliedAdjusts == nil {
+		c.AppliedAdjusts = map[string]bool{}
+	}
+	c.AppliedAdjusts[adjustID] = true
 	return n.buildSigned("reserve.accept", c.PeerBase, envStr(env, "id"), map[string]any{
 		"contact_id": c.ID,
 		"adjust_id":  adjustID,

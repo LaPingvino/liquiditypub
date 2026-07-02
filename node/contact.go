@@ -35,6 +35,13 @@ type Contact struct {
 	OpSeq       int64    // last committed operation index; the seed is op 0
 	ChannelRoot [32]byte // folds in seed + every committed transfer
 
+	// Roots[i] is the base64 channel root after committing op i (Roots[0] is the
+	// post-seed root). Retaining the history lets reconciliation compare a peer's
+	// checkpoint at *its* op_seq against our root at the same index, so a genuine
+	// fork (a different op committed at the same seq) is caught even when the peer
+	// is behind us — not only at equal op_seq (§8.3).
+	Roots []string
+
 	// Busy holds the single in-flight operation (§6.3).
 	Busy         bool
 	BusyTransfer string
@@ -43,6 +50,11 @@ type Contact struct {
 	// applied to our ledger only once the peer accepts.
 	PendingAdjustID    string
 	PendingAdjustDelta int64
+
+	// AppliedAdjusts records adjust_ids the responder has already mirrored, so a
+	// re-proposal under a fresh envelope id re-sends the acceptance instead of
+	// double-applying the reserve delta and double-bumping op_seq (§8.4).
+	AppliedAdjusts map[string]bool
 
 	// Diverged is set when the peer's checkpoint disagrees with ours at the same
 	// op_seq (§8.3): the contact is frozen for new operations until resolved out
@@ -64,7 +76,17 @@ func (c *Contact) applySeed() error {
 	}
 	c.ChannelRoot = next
 	c.OpSeq = 0
+	c.recordRoot()
 	return nil
+}
+
+// recordRoot appends the current root at index OpSeq, so Roots[OpSeq] always
+// holds the post-op root. Caller has just set ChannelRoot/OpSeq.
+func (c *Contact) recordRoot() {
+	for int64(len(c.Roots)) <= c.OpSeq {
+		c.Roots = append(c.Roots, "")
+	}
+	c.Roots[c.OpSeq] = c.channelRootB64()
 }
 
 // applyTransfer folds a committed transfer into the channel root and bumps
@@ -77,6 +99,7 @@ func (c *Contact) applyTransfer(transferID string, src, dst int64) error {
 	}
 	c.ChannelRoot = next
 	c.OpSeq++
+	c.recordRoot()
 	return nil
 }
 
@@ -90,6 +113,7 @@ func (c *Contact) applyAdjust(adjustID string, delta int64) error {
 	}
 	c.ChannelRoot = next
 	c.OpSeq++
+	c.recordRoot()
 	return nil
 }
 
@@ -199,6 +223,9 @@ func (n *Node) handleContactAccept(env map[string]any) map[string]any {
 	c := n.contacts[id]
 	if c == nil || !c.IAmProposer {
 		return n.errorReply(env, "unknown-contact", "no matching pending contact")
+	}
+	if c.PeerHost != host(envStr(env, "from")) {
+		return n.errorReply(env, "wrong-sender", "contact does not belong to sender")
 	}
 	if c.Active {
 		return nil // idempotent: already active

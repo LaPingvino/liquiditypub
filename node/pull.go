@@ -61,6 +61,27 @@ func (n *Node) StartPulling(interval time.Duration, stop <-chan struct{}) {
 	}()
 }
 
+// StartKeyRefresher periodically re-fetches every open peer's identity document
+// and prunes keys it now marks revoked (§3, §13). A push-only node that never
+// polls outboxes still needs this, or a stolen-but-revoked key would be accepted
+// on its inbox indefinitely. Runs until stop is closed.
+func (n *Node) StartKeyRefresher(interval time.Duration, stop <-chan struct{}) {
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-t.C:
+				for _, base := range n.openPeerBases() {
+					_, _, _ = n.RefreshPeerKeys(base)
+				}
+			}
+		}
+	}()
+}
+
 // openPeerBases snapshots the base URLs of all non-closed contacts.
 func (n *Node) openPeerBases() []string {
 	n.mu.Lock()

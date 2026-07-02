@@ -112,7 +112,24 @@ func Handler(n *lpnode.Node) http.Handler {
 	})
 
 	// ── admin API (out of protocol; for demos/tests) ──
-	mux.HandleFunc("/admin/contact", func(w http.ResponseWriter, r *http.Request) {
+	// adminMut guards a state-mutating admin endpoint: it must be a POST and, if
+	// the node configures an admin token, carry it as a bearer credential. Read
+	// endpoints (e.g. transfer state) are left open.
+	adminMut := func(h http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				http.Error(w, "POST only", http.StatusMethodNotAllowed)
+				return
+			}
+			if !n.AdminAuthorized(r.Header.Get("Authorization")) {
+				writeJSON(w, http.StatusUnauthorized, map[string]any{"code": "unauthorized", "detail": "admin token required"})
+				return
+			}
+			h(w, r)
+		}
+	}
+
+	mux.HandleFunc("/admin/contact", adminMut(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Peer string `json:"peer"`
 			Seed int64  `json:"seed"`
@@ -128,9 +145,9 @@ func Handler(n *lpnode.Node) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"contact_id": id})
-	})
+	}))
 
-	mux.HandleFunc("/admin/transfer", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/admin/transfer", adminMut(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Peer string `json:"peer"`
 			From string `json:"from"`
@@ -148,14 +165,14 @@ func Handler(n *lpnode.Node) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"transfer_id": id})
-	})
+	}))
 
 	mux.HandleFunc("/admin/transfer/", func(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimPrefix(r.URL.Path, "/admin/transfer/")
 		writeJSON(w, http.StatusOK, map[string]any{"state": n.TransferState(id)})
 	})
 
-	mux.HandleFunc("/admin/adjust", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/admin/adjust", adminMut(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Peer  string `json:"peer"`
 			Delta int64  `json:"delta"`
@@ -171,18 +188,18 @@ func Handler(n *lpnode.Node) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"adjust_id": id})
-	})
+	}))
 
-	mux.HandleFunc("/admin/ud", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/admin/ud", adminMut(func(w http.ResponseWriter, r *http.Request) {
 		udBase, err := n.RunUD()
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ud_base": udBase})
-	})
+	}))
 
-	mux.HandleFunc("/admin/abort", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/admin/abort", adminMut(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Transfer string `json:"transfer"`
 		}
@@ -195,9 +212,9 @@ func Handler(n *lpnode.Node) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"status": "aborted"})
-	})
+	}))
 
-	mux.HandleFunc("/admin/member", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/admin/member", adminMut(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Name        string `json:"name"`
 			DisplayName string `json:"display_name"`
@@ -219,7 +236,7 @@ func Handler(n *lpnode.Node) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"member": req.Name, "active": !req.Deactivate})
-	})
+	}))
 
 	return mux
 }

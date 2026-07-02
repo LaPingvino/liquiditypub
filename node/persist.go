@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 
 	"github.com/LaPingvino/liquiditypub/conformance"
 	"github.com/LaPingvino/liquiditypub/node/ledger"
@@ -40,6 +41,11 @@ type ownKeySnap struct {
 type inboundSnap struct {
 	SeenIDs []string `json:"seen_ids"`
 	LastSeq int64    `json:"last_seq"`
+	// Replies persists the cached response per processed message id so an
+	// idempotent duplicate is answered identically *after a restart* — without
+	// it, a re-sent request (e.g. a payer retrying transfer.commit) that is
+	// recognized as a duplicate would get no reply, wedging the sender.
+	Replies map[string]json.RawMessage `json:"replies,omitempty"`
 }
 
 // SetStore installs a persistence backend and immediately writes the current
@@ -62,9 +68,18 @@ func (n *Node) persistLocked() error {
 	}
 	data, err := json.Marshal(n.snapshotLocked())
 	if err != nil {
+		log.Printf("%s: PERSIST marshal failed (state mutation is NOT durable): %v", n.cfg.Base, err)
 		return err
 	}
-	return n.store.Save(data)
+	if err := n.store.Save(data); err != nil {
+		// The caller has already mutated in-memory state under the lock and will
+		// typically dispatch a reply. A Save failure means that state is live but
+		// not durable, so a crash would roll it back below what the peer has seen.
+		// Surface it loudly; a production node should treat this as fatal.
+		log.Printf("%s: PERSIST save failed (state mutation is NOT durable): %v", n.cfg.Base, err)
+		return err
+	}
+	return nil
 }
 
 // snapshotLocked builds the serializable snapshot. Caller holds n.mu.
@@ -108,7 +123,16 @@ func (n *Node) snapshotLocked() snapshot {
 		for id := range ci.seenIDs {
 			ids = append(ids, id)
 		}
-		snap.Inbound[host] = inboundSnap{SeenIDs: ids, LastSeq: ci.lastSeq}
+		var replies map[string]json.RawMessage
+		if len(ci.replies) > 0 {
+			replies = make(map[string]json.RawMessage, len(ci.replies))
+			for id, r := range ci.replies {
+				if b, err := json.Marshal(r); err == nil {
+					replies[id] = b
+				}
+			}
+		}
+		snap.Inbound[host] = inboundSnap{SeenIDs: ids, LastSeq: ci.lastSeq, Replies: replies}
 	}
 	for kid, pub := range n.peerKeys {
 		snap.PeerKeys[kid] = base64.RawURLEncoding.EncodeToString(pub)
@@ -187,6 +211,7 @@ func Restore(cfg Config, s store.Store) (*Node, error) {
 		inState:       map[string]*channelInbound{},
 		peerKeys:      map[string]ed25519.PublicKey{},
 		outbox:        map[string][]map[string]any{},
+		pushed:        map[string]int64{},
 		store:         s,
 	}
 	if n.outSeq == nil {
@@ -199,6 +224,12 @@ func Restore(cfg Config, s store.Store) (*Node, error) {
 		n.members[m.Name] = m
 	}
 	for _, c := range snap.Contacts {
+		// Snapshots written before root history existed carry no Roots; backfill
+		// the current root at the current op_seq so reconciliation can still
+		// compare at the head after a restart.
+		if int64(len(c.Roots)) <= c.OpSeq {
+			c.recordRoot()
+		}
 		n.contacts[c.ID] = c
 		n.contactByHost[c.PeerHost] = c
 	}
@@ -209,6 +240,13 @@ func Restore(cfg Config, s store.Store) (*Node, error) {
 		ci := &channelInbound{seenIDs: map[string]bool{}, replies: map[string]map[string]any{}, lastSeq: in.LastSeq}
 		for _, id := range in.SeenIDs {
 			ci.seenIDs[id] = true
+		}
+		for id, raw := range in.Replies {
+			if v, err := conformance.DecodeJSON(raw); err == nil {
+				if m, ok := v.(map[string]any); ok {
+					ci.replies[id] = m
+				}
+			}
 		}
 		n.inState[host] = ci
 	}

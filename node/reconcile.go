@@ -4,10 +4,13 @@ import "fmt"
 
 // Checkpoint reconciliation (PROTOCOL §8.3). Peers MUST compare channel_root and
 // op_seq on every poll; divergence freezes the contact for new operations until
-// resolved out of band (the signed histories make it attributable). We freeze
-// only on a genuine contradiction — equal op_seq but different root — because a
-// mere op_seq lag is the normal transient of an in-flight operation and
-// reconciles itself on a later poll.
+// resolved out of band (the signed histories make it attributable). We freeze on
+// a genuine contradiction — the peer's root at its op_seq disagrees with our
+// recorded root at that same index (a fork) — while a peer that is merely behind
+// but consistent is treated as normal in-flight lag that reconciles on a later
+// poll. Note: a one-sided commit that leaves a peer *permanently* behind (rather
+// than committing a conflicting op) is prevented upstream by the payer's expiry
+// guard in handleTransferAccept, since it produces no conflicting root here.
 
 // ReconcileResult reports the outcome of one reconciliation.
 type ReconcileResult struct {
@@ -51,11 +54,19 @@ func (n *Node) ReconcilePeer(peerBase string) (ReconcileResult, error) {
 		lastProc, _ := asInt(m["last_seq_processed"])
 		pruned := n.pruneOutboxLocked(c.PeerHost, lastProc)
 
-		if peerOpSeq == c.OpSeq && peerRoot != c.channelRootB64() {
+		// Compare the peer's checkpoint against our root at the *same* op_seq.
+		// A mismatch means a different operation was committed at that index on
+		// one side — a genuine fork — which we freeze on, whether the peer is even
+		// with us or behind. (A peer ahead of us has an index we cannot compare
+		// yet; we catch up via pull and check on the next poll.) A peer that is
+		// merely behind but consistent matches our historical root and is treated
+		// as normal lag (§8.3).
+		if peerOpSeq >= 0 && peerOpSeq <= c.OpSeq && peerOpSeq < int64(len(c.Roots)) &&
+			peerRoot != c.Roots[peerOpSeq] {
 			c.Diverged = true
 			_ = n.persistLocked()
 			res.Diverged = true
-			res.Detail = fmt.Sprintf("channel root divergence at op_seq %d", c.OpSeq)
+			res.Detail = fmt.Sprintf("channel root divergence at op_seq %d", peerOpSeq)
 			return res, nil
 		}
 		if pruned > 0 {
