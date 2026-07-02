@@ -404,6 +404,45 @@ func TestReserveAdjust(t *testing.T) {
 	}
 }
 
+// TestTransferExpiry asserts a stalled pre-commit transfer expires and releases
+// the contact lock (PROTOCOL §7.1, §7.4).
+func TestTransferExpiry(t *testing.T) {
+	a, b, baseA, baseB := twoNodes(t)
+	if _, err := a.OpenContact(baseB, 500_000_000, ""); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, func() bool { return a.ContactActive(baseB) && b.ContactActive(baseA) })
+
+	// Black-hole the sender so the proposal never reaches b: the transfer stays
+	// PROPOSED and the contact stays busy.
+	a.SetSender(blackhole{})
+	tid, err := a.StartTransfer(baseB, "alice@"+a.Host(), "bob@"+b.Host(), 10_000_000, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := a.ContactByPeer(baseB); !v.Busy {
+		t.Fatal("contact should be busy with the in-flight transfer")
+	}
+
+	// Advance the clock past the 1h expiry and sweep.
+	future := time.Now().UTC().Add(2 * time.Hour)
+	a.SetClock(func() time.Time { return future })
+	if n := a.SweepExpired(); n != 1 {
+		t.Fatalf("swept %d transfers, want 1", n)
+	}
+	if st := a.TransferState(tid); st != "EXPIRED" {
+		t.Errorf("transfer state = %q, want EXPIRED", st)
+	}
+	if v, _ := a.ContactByPeer(baseB); v.Busy {
+		t.Error("contact still busy after expiry")
+	}
+	// The contact is usable again: a fresh transfer can start (it will price and
+	// lock, even though delivery is still black-holed).
+	if _, err := a.StartTransfer(baseB, "alice@"+a.Host(), "bob@"+b.Host(), 5_000_000, ""); err != nil {
+		t.Errorf("contact not reusable after expiry: %v", err)
+	}
+}
+
 // TestKeyRotation rotates a node's signing key and asserts the identity doc
 // lists both keys, an announcement is emitted, and the peer accepts messages
 // signed by the new key (PROTOCOL §3).

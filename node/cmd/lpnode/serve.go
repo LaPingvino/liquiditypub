@@ -73,6 +73,9 @@ func runServe(args []string) error {
 	}
 	n.SetSender(fed.New())
 	n.Start()
+	// Always sweep expired transfers so a dropped accept/commit can't pin a
+	// contact busy past its expiry (§7.4).
+	n.StartExpirySweeper(30*time.Second, make(chan struct{}))
 
 	if *udTick {
 		if _, err := n.RunUD(); err != nil {

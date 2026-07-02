@@ -24,6 +24,7 @@ func (n *Node) AdjustReserve(peerBase string, delta int64, memo string) (string,
 		n.mu.Unlock()
 		return "", fmt.Errorf("no active contact with %s", host(peerBase))
 	}
+	n.releaseIfBusyExpired(c)
 	if c.Busy {
 		n.mu.Unlock()
 		return "", fmt.Errorf("contact busy (§6.3): op %s in flight", c.BusyTransfer)
@@ -63,6 +64,7 @@ func (n *Node) handleReserveAdjust(env map[string]any) map[string]any {
 	if c == nil || !c.Active || c.Closed {
 		return n.errorReply(env, "unknown-contact", "no active contact")
 	}
+	n.releaseIfBusyExpired(c)
 	if c.Busy {
 		return n.errorReply(env, "busy", "contact has an operation in flight")
 	}

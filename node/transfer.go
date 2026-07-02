@@ -50,6 +50,7 @@ func (n *Node) StartTransfer(peerBase, fromMember, toMember string, src int64, n
 		n.mu.Unlock()
 		return "", fmt.Errorf("no active contact with %s", peerHost)
 	}
+	n.releaseIfBusyExpired(c)
 	if c.Busy {
 		n.mu.Unlock()
 		return "", fmt.Errorf("contact busy (§6.3): op %s in flight", c.BusyTransfer)
@@ -110,6 +111,7 @@ func (n *Node) handleTransferPropose(env map[string]any) map[string]any {
 	if c == nil || !c.Active || c.Closed {
 		return n.errorReply(env, "unknown-contact", "no active contact")
 	}
+	n.releaseIfBusyExpired(c)
 	if c.Busy {
 		return n.errorReply(env, "busy", "contact has an operation in flight")
 	}

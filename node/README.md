@@ -81,4 +81,7 @@ go run ./cmd/lpconform http://127.0.0.1:8091 http://127.0.0.1:8092
   Verifier-side revocation enforcement (pruning a peer's revoked key) still
   relies on out-of-band re-verification per §13 — a node does not yet
   auto-refetch a peer identity doc to drop revoked keys.
+- Transfer expiry (§7.4) is enforced: `StartExpirySweeper` (run by `serve`) and
+  inline checks on the busy-guards move a stalled pre-commit transfer to EXPIRED
+  and release the contact lock, so a dropped accept/commit can't pin a contact.
 - Sealed outboxes (§5.1, EXPERIMENTAL) are deliberately deferred per DESIGN §10.
