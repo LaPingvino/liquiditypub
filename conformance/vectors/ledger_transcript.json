@@ -1,0 +1,199 @@
+{
+  "balances": {
+    "issuance": -600558869,
+    "m:alice": 90558869,
+    "node:hilltop.example": 560000000,
+    "treasury": -50000000
+  },
+  "description": "PROTOCOL §9.2 — append-only ledger. record hash = base64url(SHA-256(JCS({seq,prev,tx,member_sig}))), tx = {id,type,created,[ref],entries:[{account,amount}]}, prev chains the previous hash. Each tx MUST balance (entries sum to 0) and no node:* wallet may go negative. Hashes computed independently from the spec canonical rule.",
+  "head": "KlAttfkB0EtyX2c9EtPee6ys8tlFqbdJ1JfposxJZAA",
+  "money_supply": 650558869,
+  "records": [
+    {
+      "hash": "DhdInme3s0OcHnQJ8JgemynyEk-LYGDNniP3QtTrPdY",
+      "member_sig": null,
+      "prev": "",
+      "seq": 1,
+      "tx": {
+        "created": "2026-07-02T12:00:00Z",
+        "entries": [
+          {
+            "account": "m:alice",
+            "amount": 100000000
+          },
+          {
+            "account": "issuance",
+            "amount": -100000000
+          }
+        ],
+        "id": "tx-grant-alice",
+        "type": "issuance.grant"
+      }
+    },
+    {
+      "hash": "uTuVkcRg94WeXVg0t76cq8F-1KhIxFDAsqChi3OAHdg",
+      "member_sig": null,
+      "prev": "DhdInme3s0OcHnQJ8JgemynyEk-LYGDNniP3QtTrPdY",
+      "seq": 2,
+      "tx": {
+        "created": "2026-07-02T12:00:00Z",
+        "entries": [
+          {
+            "account": "node:hilltop.example",
+            "amount": 500000000
+          },
+          {
+            "account": "issuance",
+            "amount": -500000000
+          }
+        ],
+        "id": "tx-seed-hilltop",
+        "type": "contact.seed"
+      }
+    },
+    {
+      "hash": "PMmjzLcG-l1CKcv40izbpZSJrYiRJGexLzKOdScAiuw",
+      "member_sig": null,
+      "prev": "uTuVkcRg94WeXVg0t76cq8F-1KhIxFDAsqChi3OAHdg",
+      "seq": 3,
+      "tx": {
+        "created": "2026-07-02T12:00:00Z",
+        "entries": [
+          {
+            "account": "m:alice",
+            "amount": -10000000
+          },
+          {
+            "account": "node:hilltop.example",
+            "amount": 10000000
+          }
+        ],
+        "id": "tx-transfer-out",
+        "ref": "urn:uuid:transfer-1",
+        "type": "transfer.out"
+      }
+    },
+    {
+      "hash": "xCjFYunpa7dsbnrbkJ01A0GGldXbV5rjjB1xL-D0VAM",
+      "member_sig": null,
+      "prev": "PMmjzLcG-l1CKcv40izbpZSJrYiRJGexLzKOdScAiuw",
+      "seq": 4,
+      "tx": {
+        "created": "2026-07-02T12:00:00Z",
+        "entries": [
+          {
+            "account": "m:alice",
+            "amount": 558869
+          },
+          {
+            "account": "issuance",
+            "amount": -558869
+          }
+        ],
+        "id": "tx-ud",
+        "type": "issuance.ud"
+      }
+    },
+    {
+      "hash": "KlAttfkB0EtyX2c9EtPee6ys8tlFqbdJ1JfposxJZAA",
+      "member_sig": null,
+      "prev": "xCjFYunpa7dsbnrbkJ01A0GGldXbV5rjjB1xL-D0VAM",
+      "seq": 5,
+      "tx": {
+        "created": "2026-07-02T12:00:00Z",
+        "entries": [
+          {
+            "account": "node:hilltop.example",
+            "amount": 50000000
+          },
+          {
+            "account": "treasury",
+            "amount": -50000000
+          }
+        ],
+        "id": "tx-adjust",
+        "ref": "urn:uuid:adjust-1",
+        "type": "reserve.adjust"
+      }
+    }
+  ],
+  "txs": [
+    {
+      "id": "tx-grant-alice",
+      "type": "issuance.grant",
+      "created": "2026-07-02T12:00:00Z",
+      "entries": [
+        {
+          "account": "m:alice",
+          "amount": 100000000
+        },
+        {
+          "account": "issuance",
+          "amount": -100000000
+        }
+      ]
+    },
+    {
+      "id": "tx-seed-hilltop",
+      "type": "contact.seed",
+      "created": "2026-07-02T12:00:00Z",
+      "entries": [
+        {
+          "account": "node:hilltop.example",
+          "amount": 500000000
+        },
+        {
+          "account": "issuance",
+          "amount": -500000000
+        }
+      ]
+    },
+    {
+      "id": "tx-transfer-out",
+      "type": "transfer.out",
+      "ref": "urn:uuid:transfer-1",
+      "created": "2026-07-02T12:00:00Z",
+      "entries": [
+        {
+          "account": "m:alice",
+          "amount": -10000000
+        },
+        {
+          "account": "node:hilltop.example",
+          "amount": 10000000
+        }
+      ]
+    },
+    {
+      "id": "tx-ud",
+      "type": "issuance.ud",
+      "created": "2026-07-02T12:00:00Z",
+      "entries": [
+        {
+          "account": "m:alice",
+          "amount": 558869
+        },
+        {
+          "account": "issuance",
+          "amount": -558869
+        }
+      ]
+    },
+    {
+      "id": "tx-adjust",
+      "type": "reserve.adjust",
+      "ref": "urn:uuid:adjust-1",
+      "created": "2026-07-02T12:00:00Z",
+      "entries": [
+        {
+          "account": "node:hilltop.example",
+          "amount": 50000000
+        },
+        {
+          "account": "treasury",
+          "amount": -50000000
+        }
+      ]
+    }
+  ]
+}

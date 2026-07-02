@@ -13,7 +13,10 @@
 declare(strict_types=1);
 
 require __DIR__ . '/lp_core.php';
+require __DIR__ . '/lp_ledger.php';
 
+use lp\Ledger;
+use lp\LedgerError;
 use function lp\canonical;
 use function lp\channel_root0;
 use function lp\channel_next;
@@ -109,6 +112,51 @@ foreach ($d->cases as $c) {
         $amt = ud_recipient($base, (int) $r->weight);
         ok($amt === (int) $r->amount, "ud_reference: {$c->name} weight {$r->weight}");
     }
+}
+
+// ── ledger transcript (append-only log, §9.2) ────────────────────────────────
+$d = json_decode(file_get_contents("$VEC/ledger_transcript.json"), true, 512, JSON_THROW_ON_ERROR);
+$led = new Ledger();
+foreach ($d['txs'] as $i => $tx) {
+    $rec = $led->append($tx);
+    ok($rec['hash'] === $d['records'][$i]['hash'], "ledger_transcript: record " . ($i + 1) . " ({$tx['type']}) hash");
+    ok($rec['prev'] === $d['records'][$i]['prev'], "ledger_transcript: record " . ($i + 1) . " prev-link");
+}
+ok($led->head() === $d['head'], "ledger_transcript: head hash");
+ok($led->money_supply() === (int) $d['money_supply'], "ledger_transcript: money supply");
+$balOk = true;
+foreach ($d['balances'] as $acct => $want) {
+    if ($led->balance($acct) !== (int) $want) {
+        $balOk = false;
+    }
+}
+ok($balOk, "ledger_transcript: all account balances");
+
+// verify_chain accepts the freshly built log, and rebuilding from records agrees.
+try {
+    $led->verify_chain();
+    $reloaded = Ledger::from_records($led->records());
+    ok($reloaded->head() === $d['head'] && $reloaded->money_supply() === (int) $d['money_supply'],
+        "ledger_transcript: verify_chain + reload from records");
+} catch (LedgerError $e) {
+    ok(false, "ledger_transcript: verify_chain unexpectedly failed: {$e->getMessage()}");
+}
+
+// Invariants reject bad transactions.
+$l2 = new Ledger();
+try {
+    $l2->append(['id' => 'x', 'type' => 't', 'created' => 'now',
+        'entries' => [['account' => 'm:a', 'amount' => 5], ['account' => 'm:b', 'amount' => -4]]]);
+    ok(false, "ledger invariant: unbalanced tx must be rejected");
+} catch (LedgerError $e) {
+    ok(true, "ledger invariant: unbalanced tx rejected");
+}
+try {
+    $l2->append(['id' => 'y', 'type' => 't', 'created' => 'now',
+        'entries' => [['account' => 'node:peer', 'amount' => -1], ['account' => 'issuance', 'amount' => 1]]]);
+    ok(false, "ledger invariant: node wallet negative must be rejected");
+} catch (LedgerError $e) {
+    ok(true, "ledger invariant: node wallet negative rejected");
 }
 
 // ── summary ──────────────────────────────────────────────────────────────────

@@ -9,6 +9,7 @@ package main
 
 import (
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -120,5 +121,93 @@ func main() {
 			"seen_ids": []string{"urn:uuid:33333333-3333-3333-3333-333333333300"},
 		},
 		"scenarios": scenarios,
+	})
+
+	genLedgerTranscript()
+}
+
+// ── ledger_transcript.json (PROTOCOL §9.2) ───────────────────────────────────
+//
+// An independent, end-to-end golden for the append-only ledger: a scenario of
+// balanced transactions with, for each, the resulting hash-linked record. The
+// record hash is computed here straight from conformance.Canonical + SHA-256
+// (the spec rule), NOT from any node implementation, so the Go node ledger and
+// the PHP ledger are both checked against the same neutral source of truth.
+
+type ledgerEntry struct {
+	Account string `json:"account"`
+	Amount  int64  `json:"amount"`
+}
+
+type ledgerTx struct {
+	ID      string        `json:"id"`
+	Type    string        `json:"type"`
+	Ref     string        `json:"ref,omitempty"`
+	Created string        `json:"created"`
+	Entries []ledgerEntry `json:"entries"`
+}
+
+func txMap(tx ledgerTx) map[string]any {
+	entries := make([]any, len(tx.Entries))
+	for i, e := range tx.Entries {
+		entries[i] = map[string]any{"account": e.Account, "amount": e.Amount}
+	}
+	m := map[string]any{"id": tx.ID, "type": tx.Type, "created": tx.Created, "entries": entries}
+	if tx.Ref != "" {
+		m["ref"] = tx.Ref
+	}
+	return m
+}
+
+func recordHash(seq int64, prev string, tx ledgerTx) string {
+	m := map[string]any{"seq": seq, "prev": prev, "tx": txMap(tx), "member_sig": nil}
+	b, err := conformance.Canonical(m)
+	if err != nil {
+		log.Fatal(err)
+	}
+	sum := sha256.Sum256(b)
+	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+func genLedgerTranscript() {
+	const created = "2026-07-02T12:00:00Z"
+	txs := []ledgerTx{
+		{ID: "tx-grant-alice", Type: "issuance.grant", Created: created, Entries: []ledgerEntry{
+			{Account: "m:alice", Amount: 100_000_000}, {Account: "issuance", Amount: -100_000_000}}},
+		{ID: "tx-seed-hilltop", Type: "contact.seed", Created: created, Entries: []ledgerEntry{
+			{Account: "node:hilltop.example", Amount: 500_000_000}, {Account: "issuance", Amount: -500_000_000}}},
+		{ID: "tx-transfer-out", Type: "transfer.out", Ref: "urn:uuid:transfer-1", Created: created, Entries: []ledgerEntry{
+			{Account: "m:alice", Amount: -10_000_000}, {Account: "node:hilltop.example", Amount: 10_000_000}}},
+		{ID: "tx-ud", Type: "issuance.ud", Created: created, Entries: []ledgerEntry{
+			{Account: "m:alice", Amount: 558_869}, {Account: "issuance", Amount: -558_869}}},
+		{ID: "tx-adjust", Type: "reserve.adjust", Ref: "urn:uuid:adjust-1", Created: created, Entries: []ledgerEntry{
+			{Account: "node:hilltop.example", Amount: 50_000_000}, {Account: "treasury", Amount: -50_000_000}}},
+	}
+
+	records := make([]map[string]any, 0, len(txs))
+	balances := map[string]int64{}
+	prev := ""
+	for i, tx := range txs {
+		seq := int64(i + 1)
+		h := recordHash(seq, prev, tx)
+		records = append(records, map[string]any{
+			"seq": seq, "prev": prev, "member_sig": nil, "hash": h, "tx": txMap(tx),
+		})
+		for _, e := range tx.Entries {
+			balances[e.Account] += e.Amount
+		}
+		prev = h
+	}
+	moneySupply := -(balances["issuance"] + balances["treasury"])
+
+	writeJSON("ledger_transcript.json", map[string]any{
+		"description": "PROTOCOL §9.2 — append-only ledger. record hash = base64url(SHA-256(JCS({seq,prev,tx,member_sig}))), " +
+			"tx = {id,type,created,[ref],entries:[{account,amount}]}, prev chains the previous hash. Each tx MUST balance " +
+			"(entries sum to 0) and no node:* wallet may go negative. Hashes computed independently from the spec canonical rule.",
+		"txs":          txs,
+		"records":      records,
+		"head":         prev,
+		"money_supply": moneySupply,
+		"balances":     balances,
 	})
 }
