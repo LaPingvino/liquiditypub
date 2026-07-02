@@ -17,9 +17,12 @@ namespace lp;
 require_once __DIR__ . '/lp_core.php';
 require_once __DIR__ . '/lp_ledger.php';
 require_once __DIR__ . '/lp_store.php';
+require_once __DIR__ . '/lp_federation.php';
 
 class Node
 {
+    use FederationTrait;
+
     private Store $store;
     /** @var array node config (base, name, currency, transparency, issuance…) */
     private array $cfg;
@@ -37,6 +40,51 @@ class Node
     public function config(): array
     {
         return $this->cfg;
+    }
+
+    // ── signing keys (PROTOCOL §3) ────────────────────────────────────────────
+
+    /** initKey ensures the node has an active ed25519 signing key. */
+    public function initKey(): void
+    {
+        $this->store->transact(function (array &$snap): void {
+            if (!empty($snap['own_keys'])) {
+                return;
+            }
+            $seed = random_bytes(32);
+            $snap['own_keys'][] = ['local_id' => '#nk1', 'seed' => b64url($seed), 'created' => gmdate('c'), 'revoked' => ''];
+            $snap['active_key'] = '#nk1';
+        });
+    }
+
+    public function activeKeyId(): string
+    {
+        $snap = $this->store->load() ?? Store::emptySnapshot();
+        return (string) $this->cfg['base'] . LP_IDENTITY_PATH . (string) ($snap['active_key'] ?? '#nk1');
+    }
+
+    public function activePubB64(): string
+    {
+        $snap = $this->store->load() ?? Store::emptySnapshot();
+        $seed = null;
+        foreach ($snap['own_keys'] ?? [] as $k) {
+            if (($k['local_id'] ?? '') === ($snap['active_key'] ?? '')) {
+                $seed = b64url_decode((string) $k['seed']);
+            }
+        }
+        if ($seed === null || !have_sodium()) {
+            return '';
+        }
+        $kp = \sodium_crypto_sign_seed_keypair($seed);
+        return b64url(\sodium_crypto_sign_publickey($kp));
+    }
+
+    /** registerPeerKey trusts a peer's published key (§3 identity-doc fetch). */
+    public function registerPeerKey(string $keyId, string $pubB64): void
+    {
+        $this->store->transact(function (array &$snap) use ($keyId, $pubB64): void {
+            $snap['peer_keys'][$keyId] = $pubB64;
+        });
     }
 
     // ── ledger view (read-only derivations from a snapshot) ───────────────────
@@ -258,7 +306,7 @@ class Node
      *
      * @return string one of ok|unknown-key|bad-signature|duplicate|stale-seq|too-old|future|malformed|no-sodium
      */
-    public function validateInbound(array $env, array $snap): string
+    public function validateInbound(array $env, array $snap, bool $trust = false): string
     {
         $sig = $env['sig'] ?? null;
         if (!is_array($sig)) {
@@ -275,16 +323,21 @@ class Node
         if ($major !== '0') {
             return 'malformed';
         }
-        if (!have_sodium()) {
-            return 'no-sodium';
-        }
-        $pub = b64url_decode((string) $peerKeys[$keyId]);
-        $bare = $env;
-        unset($bare['sig']);
-        $canonicalBytes = self::canonicalEnvelope($bare);
-        $rawSig = b64url_decode((string) ($sig['value'] ?? ''));
-        if (!verify_detached($canonicalBytes, $rawSig, $pub)) {
-            return 'bad-signature';
+        // Signature verification (§4). $trust skips only this step (in-process
+        // transport); every other check still runs. Without sodium and without
+        // trust we cannot verify, so we refuse rather than silently accept.
+        if (!$trust) {
+            if (!have_sodium()) {
+                return 'no-sodium';
+            }
+            $pub = b64url_decode((string) $peerKeys[$keyId]);
+            $bare = $env;
+            unset($bare['sig']);
+            $canonicalBytes = self::canonicalEnvelope($bare);
+            $rawSig = b64url_decode((string) ($sig['value'] ?? ''));
+            if (!verify_detached($canonicalBytes, $rawSig, $pub)) {
+                return 'bad-signature';
+            }
         }
         $id = (string) ($env['id'] ?? '');
         if ($id === '') {
