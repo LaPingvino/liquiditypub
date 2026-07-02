@@ -24,6 +24,10 @@ func (n *Node) AdjustReserve(peerBase string, delta int64, memo string) (string,
 		n.mu.Unlock()
 		return "", fmt.Errorf("no active contact with %s", host(peerBase))
 	}
+	if c.Diverged {
+		n.mu.Unlock()
+		return "", fmt.Errorf("contact frozen: checkpoint divergence (§8.3)")
+	}
 	n.releaseIfBusyExpired(c)
 	if c.Busy {
 		n.mu.Unlock()
@@ -63,6 +67,9 @@ func (n *Node) handleReserveAdjust(env map[string]any) map[string]any {
 	c := n.contactByHost[host(envStr(env, "from"))]
 	if c == nil || !c.Active || c.Closed {
 		return n.errorReply(env, "unknown-contact", "no active contact")
+	}
+	if c.Diverged {
+		return n.errorReply(env, "frozen", "contact frozen: checkpoint divergence (§8.3)")
 	}
 	n.releaseIfBusyExpired(c)
 	if c.Busy {

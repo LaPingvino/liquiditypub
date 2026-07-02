@@ -45,6 +45,13 @@ func (b *bus) FetchOutbox(peerBase, myHost string) ([]map[string]any, error) {
 	return nil, nil
 }
 
+func (b *bus) FetchCheckpoint(peerBase string) (map[string]any, error) {
+	if n := b.byBase[peerBase]; n != nil {
+		return n.Checkpoint(), nil
+	}
+	return nil, nil
+}
+
 func twoNodes(t *testing.T) (a, b *lpnode.Node, baseA, baseB string) {
 	t.Helper()
 	baseA, baseB = "https://riverside.example", "https://hilltop.example"
@@ -254,6 +261,7 @@ type blackhole struct{}
 func (blackhole) Deliver(string, map[string]any) error                 { return nil }
 func (blackhole) FetchIdentity(string) (map[string]any, error)         { return map[string]any{}, nil }
 func (blackhole) FetchOutbox(string, string) ([]map[string]any, error) { return nil, nil }
+func (blackhole) FetchCheckpoint(string) (map[string]any, error)       { return map[string]any{}, nil }
 
 // pullBus federates by pull only: Deliver is a no-op (no push), so the entire
 // round trip is driven by fetching outboxes (§5.1).
@@ -266,6 +274,12 @@ func (p pullBus) FetchIdentity(peerBase string) (map[string]any, error) {
 func (p pullBus) FetchOutbox(peerBase, myHost string) ([]map[string]any, error) {
 	if n := p.byBase[peerBase]; n != nil {
 		return n.OutboxFor(myHost), nil
+	}
+	return nil, nil
+}
+func (p pullBus) FetchCheckpoint(peerBase string) (map[string]any, error) {
+	if n := p.byBase[peerBase]; n != nil {
+		return n.Checkpoint(), nil
 	}
 	return nil, nil
 }
@@ -401,6 +415,84 @@ func TestReserveAdjust(t *testing.T) {
 	}
 	if err := b.Ledger().VerifyChain(); err != nil {
 		t.Error(err)
+	}
+}
+
+// cpSender wraps a bus but can serve a tampered checkpoint for one peer, to
+// exercise divergence detection deterministically.
+type cpSender struct {
+	inner *bus
+	faked map[string]map[string]any // peerBase -> tampered checkpoint
+}
+
+func (c cpSender) Deliver(p string, e map[string]any) error { return c.inner.Deliver(p, e) }
+func (c cpSender) FetchIdentity(p string) (map[string]any, error) {
+	return c.inner.FetchIdentity(p)
+}
+func (c cpSender) FetchOutbox(p, h string) ([]map[string]any, error) {
+	return c.inner.FetchOutbox(p, h)
+}
+func (c cpSender) FetchCheckpoint(p string) (map[string]any, error) {
+	if cp, ok := c.faked[p]; ok {
+		return cp, nil
+	}
+	return c.inner.FetchCheckpoint(p)
+}
+
+// TestCheckpointDivergence freezes a contact when the peer's checkpoint
+// contradicts ours at the same op_seq, and leaves it alone when they agree
+// (PROTOCOL §8.3).
+func TestCheckpointDivergence(t *testing.T) {
+	a, b, baseA, baseB := twoNodes(t)
+	if _, err := a.OpenContact(baseB, 500_000_000, ""); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, func() bool { return a.ContactActive(baseB) && b.ContactActive(baseA) })
+	tid, err := a.StartTransfer(baseB, "alice@"+a.Host(), "bob@"+b.Host(), 10_000_000, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, func() bool { return a.TransferState(tid) == "SETTLED" })
+
+	va, _ := a.ContactByPeer(baseB)
+
+	// Honest checkpoint (real bus) → no divergence.
+	if res, err := a.ReconcilePeer(baseB); err != nil || res.Diverged {
+		t.Fatalf("honest reconcile flagged divergence: %+v (err %v)", res, err)
+	}
+	if v, _ := a.ContactByPeer(baseB); v.Diverged {
+		t.Fatal("contact wrongly frozen against honest peer")
+	}
+
+	// Tampered checkpoint: same op_seq, different channel root → freeze.
+	sender := cpSender{
+		inner: &bus{byBase: map[string]*lpnode.Node{baseA: a, baseB: b}},
+		faked: map[string]map[string]any{
+			baseB: {
+				"contacts": []any{
+					map[string]any{
+						"contact_id":   va.ID,
+						"op_seq":       va.OpSeq,
+						"channel_root": "TAMPERED_ROOT_VALUE",
+					},
+				},
+			},
+		},
+	}
+	a.SetSender(sender)
+	res, err := a.ReconcilePeer(baseB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Diverged {
+		t.Errorf("expected divergence, got %+v", res)
+	}
+	if v, _ := a.ContactByPeer(baseB); !v.Diverged {
+		t.Error("contact not frozen after divergence")
+	}
+	// New operations are refused on a frozen contact.
+	if _, err := a.StartTransfer(baseB, "alice@"+a.Host(), "bob@"+b.Host(), 1_000_000, ""); err == nil {
+		t.Error("transfer on a frozen (diverged) contact should be refused")
 	}
 }
 

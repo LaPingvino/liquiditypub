@@ -84,4 +84,9 @@ go run ./cmd/lpconform http://127.0.0.1:8091 http://127.0.0.1:8092
 - Transfer expiry (§7.4) is enforced: `StartExpirySweeper` (run by `serve`) and
   inline checks on the busy-guards move a stalled pre-commit transfer to EXPIRED
   and release the contact lock, so a dropped accept/commit can't pin a contact.
+- Checkpoint reconciliation (§8.3) runs on every pull cycle (`ReconcilePeer`):
+  the node fetches each peer's checkpoint and freezes a contact (`Diverged`) if
+  the peer's `channel_root` contradicts ours at the same `op_seq`, refusing new
+  operations until resolved out of band. A mere op_seq lag (a normal in-flight
+  transient) is not treated as divergence.
 - Sealed outboxes (§5.1, EXPERIMENTAL) are deliberately deferred per DESIGN §10.

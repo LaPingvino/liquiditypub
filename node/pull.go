@@ -32,11 +32,13 @@ func (n *Node) PollPeer(peerBase string) (int, error) {
 	return accepted, nil
 }
 
-// PollAll polls every open contact peer once (§5.1). Peers with a pending but
-// not-yet-active contact are included so the proposer picks up the acceptance.
+// PollAll polls every open contact peer once (§5.1) and reconciles its
+// checkpoint (§8.3). Peers with a pending but not-yet-active contact are
+// included so the proposer picks up the acceptance.
 func (n *Node) PollAll() {
 	for _, base := range n.openPeerBases() {
 		_, _ = n.PollPeer(base)
+		_, _ = n.ReconcilePeer(base)
 	}
 }
 

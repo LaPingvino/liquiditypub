@@ -79,6 +79,34 @@ func (s *HTTPSender) FetchOutbox(peerBase, myHost string) ([]map[string]any, err
 	return out, nil
 }
 
+// FetchCheckpoint retrieves a peer's signed checkpoint (§8.3), public in every
+// transparency mode. The endpoint is the conventional /lp/checkpoint.json; a
+// fully general client would resolve endpoints.checkpoint from the identity
+// document first.
+func (s *HTTPSender) FetchCheckpoint(peerBase string) (map[string]any, error) {
+	resp, err := s.Client.Get(peerBase + "/lp/checkpoint.json")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("checkpoint %s: HTTP %d", peerBase, resp.StatusCode)
+	}
+	buf := new(bytes.Buffer)
+	if _, err := buf.ReadFrom(resp.Body); err != nil {
+		return nil, err
+	}
+	v, err := conformance.DecodeJSON(buf.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	m, ok := v.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("checkpoint %s: not a JSON object", peerBase)
+	}
+	return m, nil
+}
+
 // FetchIdentity retrieves a peer's identity document, decoded with exact
 // integers (§3).
 func (s *HTTPSender) FetchIdentity(peerBase string) (map[string]any, error) {

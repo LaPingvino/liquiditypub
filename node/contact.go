@@ -43,6 +43,11 @@ type Contact struct {
 	// applied to our ledger only once the peer accepts.
 	PendingAdjustID    string
 	PendingAdjustDelta int64
+
+	// Diverged is set when the peer's checkpoint disagrees with ours at the same
+	// op_seq (§8.3): the contact is frozen for new operations until resolved out
+	// of band. The signed histories make the discrepancy attributable.
+	Diverged bool
 }
 
 // channelRootB64 encodes the current root for checkpoints (§8.3).

@@ -29,6 +29,7 @@ func (n *Node) ContactByPeer(peerBase string) (ContactView, bool) {
 		PeerReserveOfMe: c.PeerReserveOfMe,
 		Active:          c.Active,
 		Busy:            c.Busy,
+		Diverged:        c.Diverged,
 	}, true
 }
 
@@ -41,6 +42,7 @@ type ContactView struct {
 	PeerReserveOfMe int64
 	Active          bool
 	Busy            bool
+	Diverged        bool
 }
 
 // Balance returns a ledger account balance (e.g. "m:alice", "node:host").

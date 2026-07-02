@@ -50,6 +50,10 @@ func (n *Node) StartTransfer(peerBase, fromMember, toMember string, src int64, n
 		n.mu.Unlock()
 		return "", fmt.Errorf("no active contact with %s", peerHost)
 	}
+	if c.Diverged {
+		n.mu.Unlock()
+		return "", fmt.Errorf("contact frozen: checkpoint divergence (§8.3)")
+	}
 	n.releaseIfBusyExpired(c)
 	if c.Busy {
 		n.mu.Unlock()
@@ -110,6 +114,9 @@ func (n *Node) handleTransferPropose(env map[string]any) map[string]any {
 	c := n.contactByHost[fromHost]
 	if c == nil || !c.Active || c.Closed {
 		return n.errorReply(env, "unknown-contact", "no active contact")
+	}
+	if c.Diverged {
+		return n.errorReply(env, "frozen", "contact frozen: checkpoint divergence (§8.3)")
 	}
 	n.releaseIfBusyExpired(c)
 	if c.Busy {

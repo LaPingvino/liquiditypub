@@ -49,6 +49,9 @@ type Sender interface {
 	// FetchOutbox retrieves the envelopes a peer has addressed to myHost,
 	// ordered by seq (§5.1, the mandatory pull baseline).
 	FetchOutbox(peerBase, myHost string) ([]map[string]any, error)
+	// FetchCheckpoint retrieves a peer's signed checkpoint (§8.3), used for
+	// channel-root/op_seq reconciliation.
+	FetchCheckpoint(peerBase string) (map[string]any, error)
 }
 
 // Node is a running LiquidityPub node. All mutating protocol logic runs under
