@@ -24,6 +24,10 @@ class Node
 {
     use FederationTrait;
 
+    // §4 freshness window, identical to conformance ValidateEnvelope (MaxAge/MaxFuture).
+    private const MAX_AGE_SEC = 7 * 24 * 3600;
+    private const MAX_FUTURE_SEC = 3600;
+
     private Store $store;
     /** @var array node config (base, name, currency, transparency, issuance…) */
     private array $cfg;
@@ -400,7 +404,22 @@ class Node
         if ($seq <= (int) ($ci['last_seq'] ?? 0)) {
             return 'stale-seq';
         }
-        // time window omitted here (needs a clock injection); handled by caller.
+        // Freshness window (§4, step 5): reject an envelope whose `created` is
+        // unparseable (malformed), older than MaxAge, or more than MaxFuture
+        // ahead of our clock. This bounds replay of captured old envelopes and
+        // must match conformance ValidateEnvelope (7d / 1h) so a PHP and a Go
+        // node agree on the same envelope.
+        $created = strtotime((string) ($env['created'] ?? ''));
+        if ($created === false) {
+            return 'malformed';
+        }
+        $now = time();
+        if ($now - $created > self::MAX_AGE_SEC) {
+            return 'too-old';
+        }
+        if ($created - $now > self::MAX_FUTURE_SEC) {
+            return 'future';
+        }
         return 'ok';
     }
 

@@ -440,6 +440,14 @@ trait FederationTrait
         if ($t['State'] === 'COMMITTED' || $t['State'] === 'SETTLED') {
             return null; // idempotent
         }
+        // A transfer past its expiry must never commit (§7.4): the payee may have
+        // already swept its side to EXPIRED, and appending our leg here would move
+        // money with no counterpart — destroying it one-sidedly and forking the
+        // channel. Expire our side, release the lock, and tell the peer to abort.
+        if (self::expireIfDue($t, $c, time())) {
+            return $this->buildSigned($snap, 'transfer.abort', (string) $c['PeerBase'], (string) $env['id'],
+                ['transfer_id' => (string) $t['ID']]);
+        }
         $t['State'] = self::transition($t['State'], 'accept');   // -> ACCEPTED
         // Append our leg (§7.1): m:from -src, node:peer +src.
         self::ledgerLegs($snap, 'transfer.out', (string) $t['ID'], [
@@ -764,6 +772,35 @@ trait FederationTrait
     // ── expiry (PROTOCOL §7.4) ───────────────────────────────────────────────
 
     /**
+     * expireIfDue moves one transfer to EXPIRED if it is past `expires` and still
+     * pre-commit (PROPOSED/ACCEPTED), releasing the contact lock. Returns whether
+     * it expired. This is the single expiry rule shared by the sweeper and the
+     * payer-side commit guard, so both paths agree (mirrors the Go
+     * expireIfDueLocked). $t and $c are snapshot references.
+     */
+    private static function expireIfDue(array &$t, array &$c, int $now): bool
+    {
+        $st = (string) ($t['State'] ?? '');
+        if ($st !== 'PROPOSED' && $st !== 'ACCEPTED') {
+            return false;
+        }
+        $exp = strtotime((string) ($t['Expires'] ?? ''));
+        if ($exp === false || $now <= $exp) {
+            return false;
+        }
+        try {
+            $t['State'] = self::transition($st, 'expire');
+        } catch (\Throwable $e) {
+            return false;
+        }
+        if (($c['BusyTransfer'] ?? '') === $t['ID']) {
+            $c['Busy'] = false;
+            $c['BusyTransfer'] = '';
+        }
+        return true;
+    }
+
+    /**
      * sweepExpired expires every transfer past its `expires` that is still
      * pre-commit (PROPOSED/ACCEPTED) and releases the contact lock, so a dropped
      * accept/commit can't pin a contact busy forever. Both sides expire
@@ -776,26 +813,16 @@ trait FederationTrait
             $now = time();
             $count = 0;
             foreach ($snap['transfers'] as &$t) {
-                $st = (string) ($t['State'] ?? '');
-                if ($st !== 'PROPOSED' && $st !== 'ACCEPTED') {
-                    continue;
-                }
-                $exp = strtotime((string) ($t['Expires'] ?? ''));
-                if ($exp === false || $now <= $exp) {
-                    continue;
-                }
-                try {
-                    $t['State'] = self::transition($st, 'expire');
-                } catch (\Throwable $e) {
-                    continue;
-                }
                 $c = &self::contactById($snap, (string) $t['ContactID']);
-                if ($c !== null && ($c['BusyTransfer'] ?? '') === $t['ID']) {
-                    $c['Busy'] = false;
-                    $c['BusyTransfer'] = '';
+                $stub = [];
+                $lock = &$c;
+                if ($c === null) {
+                    $lock = &$stub; // no contact to unlock; give the helper a throwaway
                 }
-                unset($c);
-                $count++;
+                if (self::expireIfDue($t, $lock, $now)) {
+                    $count++;
+                }
+                unset($c, $lock);
             }
             unset($t);
             return $count;
