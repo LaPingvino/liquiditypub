@@ -84,6 +84,8 @@ try {
     [$c, $cp] = http('GET', "$base/lp/checkpoint.json");
     ok($c === 200 && isset($cp['log_hash'], $cp['money_supply']), 'GET checkpoint: 200 + fields');
     ok((int) $cp['money_supply'] === 100000000, 'checkpoint: money supply reflects grant');
+    ok(!empty($cp['sig']['value']) && Node::verifySignedDoc($cp, $seed->activePubB64()),
+        'checkpoint: served signed and verifies');
 
     [$c, $ob] = http('GET', "$base/lp/outbox/hilltop.example.json");
     ok($c === 200 && is_array($ob), 'GET outbox: 200 + array');

@@ -87,6 +87,26 @@ class Node
         });
     }
 
+    /**
+     * verifySignedDoc checks a signed document (checkpoint or envelope) against a
+     * base64url public key: it canonicalizes the doc minus its sig member and
+     * verifies sig.value, exactly as the envelope path does.
+     */
+    public static function verifySignedDoc(array $doc, string $pubB64): bool
+    {
+        if (!have_sodium()) {
+            return false;
+        }
+        $sig = $doc['sig'] ?? null;
+        if (!is_array($sig)) {
+            return false;
+        }
+        $bare = $doc;
+        unset($bare['sig']);
+        $bytes = canonical(self::toObject($bare));
+        return verify_detached($bytes, b64url_decode((string) ($sig['value'] ?? '')), b64url_decode($pubB64));
+    }
+
     // ── ledger view (read-only derivations from a snapshot) ───────────────────
 
     private function ledgerFrom(array $snap): Ledger
@@ -172,10 +192,11 @@ class Node
                 'channel_root'      => self::contactRootB64($c),
             ];
         }
-        return [
+        $cp = [
             'lp'           => '0.2',
             'type'         => 'checkpoint',
             'node'         => (string) $this->cfg['base'],
+            'created'      => gmdate('c'),
             'log_seq'      => $led->len(),
             'log_hash'     => $led->head(),
             'money_supply' => $led->money_supply(),
@@ -183,6 +204,21 @@ class Node
             'current_ud'   => (int) ($snap['current_ud'] ?? 0),
             'contacts'     => $contacts,
         ];
+        // Sign it with the active key (§8.3): checkpoints are public in every
+        // transparency mode and are what peers reconcile against, so they must be
+        // attributable. Canonicalize the doc minus its sig, exactly as envelopes.
+        if (have_sodium()) {
+            $seed = $this->activeSeed($snap);
+            if ($seed !== null) {
+                $sig = sign_detached(canonical(self::toObject($cp)), $seed);
+                $cp['sig'] = [
+                    'key'   => (string) $this->cfg['base'] . LP_IDENTITY_PATH . (string) ($snap['active_key'] ?? '#nk1'),
+                    'alg'   => 'ed25519',
+                    'value' => b64url($sig),
+                ];
+            }
+        }
+        return $cp;
     }
 
     /** outboxFor returns the ordered envelopes addressed to a peer host (§5.1). */

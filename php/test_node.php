@@ -76,6 +76,10 @@ ok(isset($id['endpoints']['inbox'], $id['endpoints']['checkpoint']), 'identity d
 $cp = $node->checkpoint();
 ok($cp['log_hash'] === $led->head() && $cp['log_seq'] === $led->len(), 'checkpoint: head matches ledger');
 ok($cp['money_supply'] === $led->money_supply(), 'checkpoint: money supply matches ledger');
+$node->initKey();
+$cp = $node->checkpoint();
+ok(!empty($cp['sig']['value']), 'checkpoint: carries a signature');
+ok(Node::verifySignedDoc($cp, $node->activePubB64()), 'checkpoint: signature verifies against the node key');
 
 // ── snapshot round-trips in Go-schema shape (empty maps as objects) ──────────
 $raw = file_get_contents($statePath);
