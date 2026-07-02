@@ -129,6 +129,10 @@ func (n *Node) route(env map[string]any) map[string]any {
 		return n.handleTransferReceipt(env)
 	case "transfer.abort":
 		return n.handleTransferAbort(env)
+	case "reserve.adjust":
+		return n.handleReserveAdjust(env)
+	case "reserve.accept":
+		return n.handleReserveAccept(env)
 	case "member.lookup":
 		return n.handleMemberLookup(env)
 	case "ping":

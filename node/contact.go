@@ -38,6 +38,11 @@ type Contact struct {
 	// Busy holds the single in-flight operation (§6.3).
 	Busy         bool
 	BusyTransfer string
+
+	// A reserve adjustment (§8.4) in flight on the proposer side: the delta is
+	// applied to our ledger only once the peer accepts.
+	PendingAdjustID    string
+	PendingAdjustDelta int64
 }
 
 // channelRootB64 encodes the current root for checkpoints (§8.3).
@@ -62,6 +67,19 @@ func (c *Contact) applySeed() error {
 // (§8.2) — identical on both sides.
 func (c *Contact) applyTransfer(transferID string, src, dst int64) error {
 	next, err := conformance.ChannelNext(c.ChannelRoot, "transfer", transferID, src, dst)
+	if err != nil {
+		return err
+	}
+	c.ChannelRoot = next
+	c.OpSeq++
+	return nil
+}
+
+// applyAdjust folds a consensual reserve adjustment into the channel root and
+// bumps opSeq (§8.4). The delta is the proposer-side reserve change; the tuple
+// is identical on both sides, so the root stays consistent.
+func (c *Contact) applyAdjust(adjustID string, delta int64) error {
+	next, err := conformance.ChannelNext(c.ChannelRoot, "adjust", adjustID, delta, 0)
 	if err != nil {
 		return err
 	}

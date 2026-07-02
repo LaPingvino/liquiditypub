@@ -73,5 +73,7 @@ go run ./cmd/lpconform http://127.0.0.1:8091 http://127.0.0.1:8092
   published `last_seq_processed` is not implemented yet (an optimization).
 - Auto-accept of contacts and genesis member grants are demo conveniences, not
   protocol requirements (both are node-internal policy under the membrane).
-- No `key.announce` rotation, `reserve.adjust`, or sealed outboxes yet — all are
-  additive to what exists.
+- `reserve.adjust` (§8.4) is implemented: consensual liquidity top-ups /
+  withdrawals (`serve` admin `/admin/adjust`, `Node.AdjustReserve`), folded into
+  the channel hash as an operation. `key.announce` rotation and sealed outboxes
+  are still additive TODOs.

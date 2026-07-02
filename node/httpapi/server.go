@@ -114,6 +114,24 @@ func Handler(n *lpnode.Node) http.Handler {
 		writeJSON(w, http.StatusOK, map[string]any{"state": n.TransferState(id)})
 	})
 
+	mux.HandleFunc("/admin/adjust", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Peer  string `json:"peer"`
+			Delta int64  `json:"delta"`
+			Memo  string `json:"memo"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		id, err := n.AdjustReserve(req.Peer, req.Delta, req.Memo)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"adjust_id": id})
+	})
+
 	mux.HandleFunc("/admin/ud", func(w http.ResponseWriter, r *http.Request) {
 		udBase, err := n.RunUD()
 		if err != nil {

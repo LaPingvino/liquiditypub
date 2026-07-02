@@ -332,6 +332,78 @@ func TestPullOnlyFederation(t *testing.T) {
 	}
 }
 
+// TestReserveAdjust exercises consensual liquidity top-up and withdrawal
+// (PROTOCOL §8.4): both sides mirror the reserve change, fold it into the
+// channel hash, and stay reconciled.
+func TestReserveAdjust(t *testing.T) {
+	a, b, baseA, baseB := twoNodes(t)
+	if _, err := a.OpenContact(baseB, 500_000_000, ""); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, func() bool { return a.ContactActive(baseB) && b.ContactActive(baseA) })
+
+	// Top up: Riverside adds 100M of its own liquidity to the pool.
+	if _, err := a.AdjustReserve(baseB, 100_000_000, "market day top-up"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, func() bool {
+		v, _ := a.ContactByPeer(baseB)
+		return v.OpSeq == 1 && !v.Busy
+	})
+	va, _ := a.ContactByPeer(baseB)
+	vb, _ := b.ContactByPeer(baseA)
+	if va.MyReserveOfPeer != 600_000_000 {
+		t.Errorf("A reserve after top-up = %d, want 600M", va.MyReserveOfPeer)
+	}
+	if vb.PeerReserveOfMe != 600_000_000 {
+		t.Errorf("B mirror after top-up = %d, want 600M", vb.PeerReserveOfMe)
+	}
+	if va.ChannelRoot != vb.ChannelRoot || va.OpSeq != vb.OpSeq {
+		t.Errorf("reconciliation mismatch after top-up")
+	}
+	if got := a.Balance(ledger.NodeWalletPrefix + b.Host()); got != 600_000_000 {
+		t.Errorf("A node wallet = %d, want 600M", got)
+	}
+	if got := a.Balance(ledger.AcctTreasury); got != -100_000_000 {
+		t.Errorf("A treasury = %d, want -100M", got)
+	}
+
+	// Withdraw 50M back to treasury.
+	if _, err := a.AdjustReserve(baseB, -50_000_000, "end of day"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, func() bool {
+		v, _ := a.ContactByPeer(baseB)
+		return v.OpSeq == 2 && !v.Busy
+	})
+	va, _ = a.ContactByPeer(baseB)
+	vb, _ = b.ContactByPeer(baseA)
+	if va.MyReserveOfPeer != 550_000_000 || vb.PeerReserveOfMe != 550_000_000 {
+		t.Errorf("reserves after withdrawal: A=%d B=%d, want 550M", va.MyReserveOfPeer, vb.PeerReserveOfMe)
+	}
+	if va.ChannelRoot != vb.ChannelRoot {
+		t.Errorf("channel root divergence after withdrawal")
+	}
+
+	// Over-withdrawal is refused.
+	if _, err := a.AdjustReserve(baseB, -600_000_000, "too much"); err == nil {
+		t.Error("expected over-withdrawal to be refused")
+	}
+
+	// The pool still prices and transfers correctly against the new reserves.
+	tid, err := a.StartTransfer(baseB, "alice@"+a.Host(), "bob@"+b.Host(), 10_000_000, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, func() bool { return a.TransferState(tid) == "SETTLED" })
+	if err := a.Ledger().VerifyChain(); err != nil {
+		t.Error(err)
+	}
+	if err := b.Ledger().VerifyChain(); err != nil {
+		t.Error(err)
+	}
+}
+
 // TestRestartReplay persists a node through a contact + transfer, rebuilds it
 // from the store, and asserts the resumed node has identical state and can
 // keep transacting.
