@@ -26,6 +26,18 @@ type Member struct {
 	Active      bool
 }
 
+// ownKey is one of this node's signing keys (PROTOCOL §3). A node keeps a
+// keyring so it can rotate: a new key is announced by a still-valid old one,
+// and retired keys stay listed (and verifiable) until revoked.
+type ownKey struct {
+	LocalID string // e.g. "#nk1"
+	Seed    string // base64url ed25519 seed
+	Created string
+	Revoked string // "" while valid; RFC3339 once revoked
+	priv    ed25519.PrivateKey
+	pub     ed25519.PublicKey
+}
+
 // Sender delivers an outbound envelope to a peer. The HTTP runtime supplies a
 // real implementation (POST to the peer inbox); tests may supply an in-process
 // one. Returning an error only affects retry/logging — protocol correctness is
@@ -43,10 +55,11 @@ type Sender interface {
 // mu, so a contact is naturally serialized (PROTOCOL §6.3).
 type Node struct {
 	cfg        Config
-	priv       ed25519.PrivateKey
+	priv       ed25519.PrivateKey // the active signing key
 	pub        ed25519.PublicKey
-	keyLocalID string // e.g. "#nk1"
-	created    string // key/node creation timestamp
+	keyLocalID string    // active key's local id, e.g. "#nk1"
+	ownKeys    []*ownKey // full keyring (active + retired-but-valid + revoked)
+	created    string    // key/node creation timestamp
 	clock      Clock
 
 	mu  sync.Mutex
@@ -118,6 +131,11 @@ func NewNode(cfg Config) (*Node, error) {
 	}
 	n.created = n.clock().Format(time.RFC3339)
 
+	// Seed the keyring with the initial active key.
+	n.ownKeys = []*ownKey{{
+		LocalID: n.keyLocalID, Seed: b64(priv.Seed()), Created: n.created,
+		priv: priv, pub: n.pub,
+	}}
 	// Register my own key so self-verification and identity export line up.
 	n.peerKeys[keyID(cfg.Base, n.keyLocalID)] = n.pub
 

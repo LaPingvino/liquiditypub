@@ -106,15 +106,7 @@ func (n *Node) IdentityDoc() map[string]any {
 			"ud_period":    n.cfg.UDPeriod,
 			"current_ud":   n.currentUD,
 		},
-		"keys": []any{
-			map[string]any{
-				"id":         n.keyLocalID,
-				"alg":        "ed25519",
-				"public_key": pubB64(n.pub),
-				"created":    n.created,
-				"revoked":    nil,
-			},
-		},
+		"keys": n.keyDocs(),
 		"endpoints": map[string]any{
 			"inbox":      "/lp/inbox",
 			"outbox":     "/lp/outbox/{peer-host}.json",

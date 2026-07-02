@@ -215,6 +215,45 @@ func (n *Node) handleContactAccept(env map[string]any) map[string]any {
 	return nil // acceptance needs no reply; both sides are now open
 }
 
+// CloseContact freezes new operations on a contact (§6). Existing reserves
+// survive until withdrawn by consent (reserve.adjust); an in-flight operation
+// is allowed to finish.
+func (n *Node) CloseContact(peerBase, note string) error {
+	n.mu.Lock()
+	c := n.contactByHost[host(peerBase)]
+	if c == nil {
+		n.mu.Unlock()
+		return fmt.Errorf("no contact with %s", host(peerBase))
+	}
+	c.Closed = true
+	env := n.buildSigned("contact.close", c.PeerBase, "", map[string]any{
+		"contact_id": c.ID,
+		"note":       note,
+	})
+	_ = n.persistLocked()
+	n.mu.Unlock()
+	n.dispatch(peerBase, env)
+	return nil
+}
+
+// handleContactClose freezes the contact on receipt (§6).
+func (n *Node) handleContactClose(env map[string]any) map[string]any {
+	if c := n.contactByHost[host(envStr(env, "from"))]; c != nil {
+		c.Closed = true
+	}
+	return nil
+}
+
+// handleContactUpdate accepts a peer's unilateral parameter change (§6). It is
+// informational — actual reserve changes go through reserve.adjust — so we
+// acknowledge by accepting the envelope and make no state change.
+func (n *Node) handleContactUpdate(env map[string]any) map[string]any {
+	if c := n.contactByHost[host(envStr(env, "from"))]; c == nil {
+		return n.errorReply(env, "unknown-contact", "no contact")
+	}
+	return nil
+}
+
 // seedLedger books our seed leg: our node wallet for the peer grows, sourced
 // from `issuance` (freshly issued; a treasury variant is pure node policy, §6.1).
 func (n *Node) seedLedger(peerHost string, amount int64) error {

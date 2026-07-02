@@ -16,7 +16,8 @@ import (
 // transfers, channel bookkeeping, and outboxes are protocol state the ledger
 // alone can't reconstruct, so they are persisted alongside it.
 type snapshot struct {
-	PrivSeed  string                       `json:"priv_seed"`
+	OwnKeys   []ownKeySnap                 `json:"own_keys"`
+	ActiveKey string                       `json:"active_key"`
 	Created   string                       `json:"created"`
 	CurrentUD int64                        `json:"current_ud"`
 	Members   []*Member                    `json:"members"`
@@ -27,6 +28,13 @@ type snapshot struct {
 	Inbound   map[string]inboundSnap       `json:"inbound"`
 	Outbox    map[string][]json.RawMessage `json:"outbox"`
 	PeerKeys  map[string]string            `json:"peer_keys"` // keyid -> b64 pubkey
+}
+
+type ownKeySnap struct {
+	LocalID string `json:"local_id"`
+	Seed    string `json:"seed"`
+	Created string `json:"created"`
+	Revoked string `json:"revoked"`
 }
 
 type inboundSnap struct {
@@ -62,7 +70,7 @@ func (n *Node) persistLocked() error {
 // snapshotLocked builds the serializable snapshot. Caller holds n.mu.
 func (n *Node) snapshotLocked() snapshot {
 	snap := snapshot{
-		PrivSeed:  base64.RawURLEncoding.EncodeToString(n.priv.Seed()),
+		ActiveKey: n.keyLocalID,
 		Created:   n.created,
 		CurrentUD: n.currentUD,
 		OutSeq:    n.outSeq,
@@ -70,6 +78,11 @@ func (n *Node) snapshotLocked() snapshot {
 		Outbox:    map[string][]json.RawMessage{},
 		Inbound:   map[string]inboundSnap{},
 		PeerKeys:  map[string]string{},
+	}
+	for _, k := range n.ownKeys {
+		snap.OwnKeys = append(snap.OwnKeys, ownKeySnap{
+			LocalID: k.LocalID, Seed: k.Seed, Created: k.Created, Revoked: k.Revoked,
+		})
 	}
 	for _, m := range n.members {
 		snap.Members = append(snap.Members, m)
@@ -127,11 +140,27 @@ func Restore(cfg Config, s store.Store) (*Node, error) {
 	if err := json.Unmarshal(data, &snap); err != nil {
 		return nil, fmt.Errorf("decode snapshot: %w", err)
 	}
-	seed, err := base64.RawURLEncoding.DecodeString(snap.PrivSeed)
-	if err != nil || len(seed) != ed25519.SeedSize {
-		return nil, fmt.Errorf("invalid persisted private key")
+	// Rebuild the keyring; resolve the active key.
+	var ownKeys []*ownKey
+	var active *ownKey
+	for _, ks := range snap.OwnKeys {
+		seed, err := base64.RawURLEncoding.DecodeString(ks.Seed)
+		if err != nil || len(seed) != ed25519.SeedSize {
+			return nil, fmt.Errorf("invalid persisted key %q", ks.LocalID)
+		}
+		priv := ed25519.NewKeyFromSeed(seed)
+		k := &ownKey{
+			LocalID: ks.LocalID, Seed: ks.Seed, Created: ks.Created, Revoked: ks.Revoked,
+			priv: priv, pub: priv.Public().(ed25519.PublicKey),
+		}
+		ownKeys = append(ownKeys, k)
+		if k.LocalID == snap.ActiveKey {
+			active = k
+		}
 	}
-	priv := ed25519.NewKeyFromSeed(seed)
+	if active == nil {
+		return nil, fmt.Errorf("active key %q not found in keyring", snap.ActiveKey)
+	}
 	led, err := ledger.Load(snap.Ledger)
 	if err != nil {
 		return nil, fmt.Errorf("load ledger: %w", err)
@@ -142,9 +171,10 @@ func Restore(cfg Config, s store.Store) (*Node, error) {
 	}
 	n := &Node{
 		cfg:           cfg,
-		priv:          priv,
-		pub:           priv.Public().(ed25519.PublicKey),
-		keyLocalID:    "#nk1",
+		priv:          active.priv,
+		pub:           active.pub,
+		keyLocalID:    active.LocalID,
+		ownKeys:       ownKeys,
 		clock:         realClock,
 		created:       snap.Created,
 		currentUD:     snap.CurrentUD,
@@ -198,7 +228,9 @@ func Restore(cfg Config, s store.Store) (*Node, error) {
 			n.peerKeys[kid] = ed25519.PublicKey(pub)
 		}
 	}
-	// Belt and suspenders: our own key must always be resolvable.
-	n.peerKeys[keyID(cfg.Base, n.keyLocalID)] = n.pub
+	// Belt and suspenders: every own key must always be resolvable.
+	for _, k := range n.ownKeys {
+		n.peerKeys[keyID(cfg.Base, k.LocalID)] = k.pub
+	}
 	return n, nil
 }

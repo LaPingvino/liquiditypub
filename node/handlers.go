@@ -117,6 +117,12 @@ func (n *Node) route(env map[string]any) map[string]any {
 		return n.handleContactPropose(env)
 	case "contact.accept":
 		return n.handleContactAccept(env)
+	case "contact.update":
+		return n.handleContactUpdate(env)
+	case "contact.close":
+		return n.handleContactClose(env)
+	case "key.announce":
+		return n.handleKeyAnnounce(env)
 	case "transfer.propose":
 		return n.handleTransferPropose(env)
 	case "transfer.accept":

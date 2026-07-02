@@ -404,6 +404,124 @@ func TestReserveAdjust(t *testing.T) {
 	}
 }
 
+// TestKeyRotation rotates a node's signing key and asserts the identity doc
+// lists both keys, an announcement is emitted, and the peer accepts messages
+// signed by the new key (PROTOCOL §3).
+func TestKeyRotation(t *testing.T) {
+	a, b, baseA, baseB := twoNodes(t)
+	if _, err := a.OpenContact(baseB, 500_000_000, ""); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, func() bool { return a.ContactActive(baseB) && b.ContactActive(baseA) })
+
+	if keys := a.IdentityDoc()["keys"].([]any); len(keys) != 1 {
+		t.Fatalf("pre-rotation key count = %d, want 1", len(keys))
+	}
+	newID, err := a.RotateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newID != "#nk2" {
+		t.Errorf("new key id = %q, want #nk2", newID)
+	}
+	if keys := a.IdentityDoc()["keys"].([]any); len(keys) != 2 {
+		t.Errorf("post-rotation key count = %d, want 2", len(keys))
+	}
+	// A key.announce was queued to the peer.
+	sawAnnounce := false
+	for _, e := range a.OutboxFor(b.Host()) {
+		if e["type"] == "key.announce" {
+			sawAnnounce = true
+		}
+	}
+	if !sawAnnounce {
+		t.Error("no key.announce emitted to peer")
+	}
+
+	// A transfer after rotation is signed by the new key and accepted by b.
+	tid, err := a.StartTransfer(baseB, "alice@"+a.Host(), "bob@"+b.Host(), 10_000_000, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, func() bool { return b.TransferState(tid) == "SETTLED" })
+	// Confirm the propose really used #nk2.
+	usedNewKey := false
+	for _, e := range a.OutboxFor(b.Host()) {
+		if e["type"] == "transfer.propose" {
+			if sig, ok := e["sig"].(map[string]any); ok {
+				if k, _ := sig["key"].(string); len(k) >= 4 && k[len(k)-4:] == "#nk2" {
+					usedNewKey = true
+				}
+			}
+		}
+	}
+	if !usedNewKey {
+		t.Error("transfer.propose was not signed by the rotated key")
+	}
+}
+
+// TestKeyringPersists rotates a key, restarts the node from its store, and
+// asserts both keys survive and the rotated key is still active.
+func TestKeyringPersists(t *testing.T) {
+	dir := t.TempDir()
+	st := store.NewFile(dir + "/n.json")
+	cfg := lpnode.Config{
+		Base: "https://n.example", Name: "N", CurrencyName: "N", CurrencySymbol: "N",
+		CPeriodPpm: 274, UDPeriod: "P1D", GenesisUD: 1_000_000, AutoAcceptSeed: 1,
+		Members: []lpnode.MemberConfig{{Name: "alice", Grant: 1_000_000}},
+	}
+	n, err := lpnode.Restore(cfg, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n.SetSender(blackhole{})
+	n.Start()
+	if _, err := n.RotateKey(); err != nil { // no contacts: just add + switch
+		t.Fatal(err)
+	}
+
+	n2, err := lpnode.Restore(cfg, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keys := n2.IdentityDoc()["keys"].([]any); len(keys) != 2 {
+		t.Fatalf("key count after restart = %d, want 2", len(keys))
+	}
+	sig := n2.Checkpoint()["sig"].(map[string]any)
+	if k, _ := sig["key"].(string); len(k) < 4 || k[len(k)-4:] != "#nk2" {
+		t.Errorf("active key after restart = %q, want ...#nk2", sig["key"])
+	}
+}
+
+// TestContactClose freezes a contact and asserts new operations are refused
+// while reserves survive (PROTOCOL §6).
+func TestContactClose(t *testing.T) {
+	a, b, baseA, baseB := twoNodes(t)
+	if _, err := a.OpenContact(baseB, 500_000_000, ""); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, func() bool { return a.ContactActive(baseB) && b.ContactActive(baseA) })
+
+	if err := a.CloseContact(baseB, "season over"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, func() bool {
+		v, ok := b.ContactByPeer(baseA)
+		return ok && !b.ContactActive(baseA) && v.MyReserveOfPeer == 500_000_000
+	})
+	// New transfers refused on both ends.
+	if _, err := a.StartTransfer(baseB, "alice@"+a.Host(), "bob@"+b.Host(), 1_000_000, ""); err == nil {
+		t.Error("transfer on a closed contact should be refused (proposer side)")
+	}
+	if _, err := a.AdjustReserve(baseB, 1_000_000, ""); err == nil {
+		t.Error("reserve.adjust on a closed contact should be refused")
+	}
+	// Reserves still present (survive until withdrawn by consent).
+	if got := a.Balance(ledger.NodeWalletPrefix + b.Host()); got != 500_000_000 {
+		t.Errorf("reserve after close = %d, want 500M (survives)", got)
+	}
+}
+
 // TestRestartReplay persists a node through a contact + transfer, rebuilds it
 // from the store, and asserts the resumed node has identical state and can
 // keep transacting.

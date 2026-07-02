@@ -75,5 +75,10 @@ go run ./cmd/lpconform http://127.0.0.1:8091 http://127.0.0.1:8092
   protocol requirements (both are node-internal policy under the membrane).
 - `reserve.adjust` (§8.4) is implemented: consensual liquidity top-ups /
   withdrawals (`serve` admin `/admin/adjust`, `Node.AdjustReserve`), folded into
-  the channel hash as an operation. `key.announce` rotation and sealed outboxes
-  are still additive TODOs.
+  the channel hash as an operation.
+- Key rotation (§3, `Node.RotateKey`/`RevokeKey`, `key.announce`) and
+  `contact.close`/`contact.update` (§6) are implemented, keyring persisted.
+  Verifier-side revocation enforcement (pruning a peer's revoked key) still
+  relies on out-of-band re-verification per §13 — a node does not yet
+  auto-refetch a peer identity doc to drop revoked keys.
+- Sealed outboxes (§5.1, EXPERIMENTAL) are deliberately deferred per DESIGN §10.
