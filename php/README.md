@@ -40,36 +40,51 @@ uses (`../conformance/vectors/*.json`):
 php php/test_vectors.php
 ```
 
-Current status: **17/17 runnable vectors pass** — canonical JSON, the channel
-hash chain (seed + transfer + adjust), pool pricing (including the case whose
-intermediates exceed 2⁵³, which forces exact arithmetic), and the UD reference.
-The Ed25519 sign/verify vectors need the `sodium` extension; where it is absent
-they report SKIP, because the real divergence risk — the exact bytes that get
-signed — is already checked byte-for-byte, and RFC 8032 signing over identical
-bytes is deterministic by definition.
+Status: **35/35 vectors pass** (with sodium; the ledger-transcript golden is
+checked here *and* by the Go ledger, so the two agree transitively). Run the
+whole PHP suite:
 
-This is the load-bearing result: a PHP node and a Go node agree on every byte the
-protocol pins.
+```
+php php/test_vectors.php      # 35/35 — core + ledger vs the Go vectors
+php php/test_node.php         # node layer: store, issuance, read surface, queue
+php php/test_federation.php   # two signed nodes: contact, transfer, reserve (in-process)
+php php/test_http.php         # the HTTP front controller
+php php/test_transport.php    # two nodes federating over REAL HTTP (pull + push)
+```
 
-## What remains (the node layer)
+## What's implemented
 
-The core is done and proven; the stateful node around it mirrors the Go node's
-structure and is the remaining work:
+The node is complete enough to deploy and federate:
 
-1. **State store** — one JSON snapshot blob, byte-compatible with the Go node's
-   `store.Store` schema, in a file (`flock` for the single-writer discipline) or
-   a SQLite/MySQL row. Sharing the snapshot format means state is portable
-   between the Go and PHP implementations.
-2. **Read surface** (static-friendly, §5.1/§9.2): `/.well-known/liquiditypub`,
-   `/lp/checkpoint.json`, `/lp/outbox/<host>.json`, `/lp/log/page-N.json` — plain
-   files or trivial PHP that reads the snapshot.
-3. **Inbox** (§5.2): `inbox.php` validates an envelope with the core (`sig.key`
-   bound to `from`, seq/dup/window checks) and applies it under the file lock.
-4. **Pull + issuance** (§5.1, §10): a cron-driven `poll.php` that fetches peer
-   outboxes/checkpoints and runs the UD scheduler. The mandatory pull baseline
-   means no always-on process is required; a ≤15-minute cron tick is a compliant
-   live node.
+| File | Role |
+|------|------|
+| `lp_core.php` | canonical JSON, hashing, base64url, pool pricing, UD, ed25519 — the vector-pinned core, no state |
+| `lp_ledger.php` | append-only double-entry ledger (§9): sum=0 + non-negative-node-wallet invariants, hash chain |
+| `lp_store.php` | flock single-writer JSON snapshot store (Go `store.Store` schema), atomic saves |
+| `lp_node.php` | identity doc, signed checkpoint, read surface, UD scheduler, membership, §4 validation, action-queue drain |
+| `lp_federation.php` | contact / transfer / reserve state machines (§6–§8), envelope build+sign, `processInbound` |
+| `lp_transport.php` | HTTP client (fetch identity/outbox/checkpoint, push inbox) |
+| `public/index.php` | the HTTP front controller — the only file exposed to the web |
+| `poll.php` | cron driver: drain queue → federate (pull+push) → optional `--ud` |
+| `web/` | operator dashboard (reads the live snapshot; forms queue intents `poll.php` applies) |
 
-Every one of these steps is verifiable the same way: extend the vector set with
-end-to-end transcript vectors (envelope-in → snapshot-delta / reply-out) emitted
-by the Go reference, and replay them in PHP.
+## Deploying on cheap hosting
+
+1. Copy `config.example.php` to `config.php` and set `base`, `state_file` (keep
+   it **out of the web root**), and `peers`.
+2. Point your web root at `php/public/` (or rewrite everything to
+   `public/index.php`). It serves the identity doc, checkpoint, outbox, and log,
+   and accepts pushes at `/lp/inbox`.
+3. Add a cron entry: `*/15 * * * * php /path/php/poll.php` to federate, and
+   `0 0 * * * php /path/php/poll.php --ud` for the daily dividend. The mandatory
+   pull baseline (§5.1) means no always-on process is needed.
+4. Point the dashboard (`php/web/`) at the same host to drive the node.
+
+Requires the `gmp`, `hash`, `curl`, and `sodium` PHP extensions — all standard.
+
+## What's next
+
+Interop with the Go node over HTTP (needs a running Go instance), and the
+remaining niceties: transfer-expiry sweep + checkpoint-divergence detection
+(port of `node/expiry.go` / `node/reconcile.go`), and the `contact.close/update`,
+`member.lookup`, and key-rotation handlers.

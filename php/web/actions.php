@@ -138,7 +138,7 @@ and queues it. Read views elsewhere stay a faithful mirror of committed state.</
   <div class="notice done" role="status">
     <strong>Intent queued.</strong>
     Recorded <span class="mono"><?= h((string) $_GET['ok']) ?></span> to the action queue.
-    The node layer will validate and apply it. (Stub: no state has changed yet.)
+    The node applies it (and any peer exchange it needs) on the next <span class="mono">poll.php</span> run.
   </div>
 <?php endif; ?>
 

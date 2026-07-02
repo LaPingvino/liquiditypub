@@ -10,19 +10,32 @@ declare(strict_types=1);
 
 // ── Configuration seams ──────────────────────────────────────────────────────
 
-// The ONE place state comes from. Swap this path for a real node snapshot
-// (byte-compatible with the Go `store.Store` schema, see node/persist.go) and
-// every view follows. In production this would read the flock-guarded snapshot
-// blob the node writes; nothing else changes.
-const LP_STATE_FILE  = __DIR__ . '/sample-state.json';
-
-// Where operator intents are appended. The real node layer drains this queue,
-// validates against live state, and applies the mutations. Until then the
-// dashboard only ever *records intent* here — it fakes no ledger changes.
-const LP_QUEUE_FILE  = __DIR__ . '/action-queue.jsonl';
-
 const LP_MICRO       = 1000000;   // 1 unit = 1,000,000 micro-units (PROTOCOL §2)
 const LP_PAGE_SIZE   = 100;       // fixed log page size, mirrors the Go /lp/log paging
+
+// web_config loads the node's config.php if present (a live deployment), else
+// returns [] and the dashboard falls back to the bundled demo snapshot.
+function web_config(): array
+{
+    static $c = null;
+    if ($c === null) {
+        $path = __DIR__ . '/../config.php';
+        $c = is_file($path) ? (array) (require $path) : [];
+    }
+    return $c;
+}
+
+// State/queue paths: the live node's when config.php exists, otherwise the demo
+// sample so the dashboard runs standalone. poll.php drains the SAME queue the
+// action forms write to, so operator intents reach the node.
+function state_file(): string
+{
+    return (string) (web_config()['state_file'] ?? (__DIR__ . '/sample-state.json'));
+}
+function queue_file(): string
+{
+    return (string) (web_config()['queue_file'] ?? (__DIR__ . '/action-queue.jsonl'));
+}
 
 // ── State loading (the single seam) ──────────────────────────────────────────
 
@@ -37,10 +50,10 @@ function load_snapshot(): array
     if ($cache !== null) {
         return $cache;
     }
-    $raw = @file_get_contents(LP_STATE_FILE);
+    $raw = @file_get_contents(state_file());
     if ($raw === false) {
         http_response_code(500);
-        exit('Unable to read node state at ' . htmlspecialchars(LP_STATE_FILE, ENT_QUOTES));
+        exit('Unable to read node state at ' . htmlspecialchars(state_file(), ENT_QUOTES));
     }
     $data = json_decode($raw, true);
     if (!is_array($data)) {
@@ -53,6 +66,19 @@ function load_snapshot(): array
         'transfers' => [], 'own_keys' => [], 'peer_keys' => [], 'out_seq' => [],
         'current_ud' => 0, 'active_key' => '', 'created' => '',
     ];
+    // A live node snapshot (Go schema) carries no identity/config block, so pull
+    // it from config.php; the bundled demo snapshot supplies its own.
+    if (empty($data['config'])) {
+        $wc = web_config();
+        $data['config'] = [
+            'name'            => $wc['name'] ?? 'LiquidityPub',
+            'base'            => $wc['base'] ?? '',
+            'currency_name'   => $wc['currency_name'] ?? '',
+            'currency_symbol' => $wc['currency_symbol'] ?? '◇',
+            'transparency'    => $wc['transparency'] ?? 'pseudonymous',
+            'c_period_ppm'    => $wc['c_period_ppm'] ?? 0,
+        ];
+    }
     $cache = $data;
     return $cache;
 }
@@ -149,7 +175,7 @@ function queue_intent(array $intent): bool
     if ($line === false) {
         return false;
     }
-    $fh = @fopen(LP_QUEUE_FILE, 'a');
+    $fh = @fopen(queue_file(), 'a');
     if (!$fh) {
         return false;
     }
