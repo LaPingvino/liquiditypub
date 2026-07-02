@@ -155,6 +155,21 @@ trait FederationTrait
     {
         $snapForCheck = $this->store->load() ?? Store::emptySnapshot();
         $verdict = $this->validateInbound($env, $snapForCheck, $trust);
+        // On an unknown key that is nonetheless bound to `from`, fetch the
+        // sender's identity document once and retry (§3 TOFU) — this is what lets
+        // a passive push-only node verify a peer it has not polled yet.
+        if ($verdict === 'unknown-key' && !$trust && $this->transport !== null) {
+            $from = (string) ($env['from'] ?? '');
+            $keyId = (string) (($env['sig']['key'] ?? '') ?: '');
+            if ($from !== '' && self::keyBoundToSender($keyId, $from)) {
+                $doc = $this->transport->fetchIdentity($from);
+                if ($doc !== null) {
+                    $this->registerPeerFromDoc($doc);
+                    $snapForCheck = $this->store->load() ?? Store::emptySnapshot();
+                    $verdict = $this->validateInbound($env, $snapForCheck, $trust);
+                }
+            }
+        }
         if ($verdict === 'duplicate') {
             $fromHost = self::hostOf((string) ($env['from'] ?? ''));
             $reply = $snapForCheck['inbound'][$fromHost]['replies'][(string) $env['id']] ?? null;

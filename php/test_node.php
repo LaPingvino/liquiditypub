@@ -89,22 +89,25 @@ $reloaded = json_decode($raw, true);
 ok(is_array($reloaded['members']) && ($reloaded['members'][0]['Name'] ?? '') === 'alice',
     'snapshot: members are a list with capitalized Go field names');
 
-// ── action queue: local intents apply, federation intents defer ──────────────
+// ── action queue: every intent applies (federation ones write to the outbox) ──
 file_put_contents($queuePath, implode("\n", [
     json_encode(['action' => 'add_member', 'name' => 'carol', 'display_name' => 'Carol', 'weight_micro' => 1000000]),
     json_encode(['action' => 'run_ud']),
     json_encode(['action' => 'open_contact', 'peer_base' => 'https://hilltop.example', 'my_seed_micro' => 500000000]),
-    json_encode(['action' => 'send_transfer', 'from_member' => 'alice', 'to' => 'x@hilltop.example', 'src_amount_micro' => 1000000]),
 ]) . "\n");
 $res = $node->drainActionQueue($queuePath);
-ok($res['applied'] === 2, "action queue: applied 2 local intents (got {$res['applied']})");
-ok($res['deferred'] === 2, "action queue: deferred 2 federation intents (got {$res['deferred']})");
-ok(empty($res['errors']), 'action queue: no errors');
+ok($res['applied'] === 3, "action queue: applied 3 intents (got {$res['applied']})");
+ok(empty($res['errors']), 'action queue: no errors: ' . implode('; ', $res['errors']));
 $snap = $node->store()->load();
 ok(isset(Node::activeMembers($snap)['carol']), 'action queue: carol admitted via queue');
-$remaining = file_get_contents($queuePath);
-ok(strpos($remaining, 'open_contact') !== false && strpos($remaining, 'add_member') === false,
-    'action queue: only federation intents remain queued');
+$hasContact = false;
+foreach ($snap['contacts'] as $c) {
+    if (($c['PeerHost'] ?? '') === 'hilltop.example') {
+        $hasContact = true;
+    }
+}
+ok($hasContact, 'action queue: open_contact created a pending contact');
+ok(!empty($snap['outbox']['hilltop.example']), 'action queue: contact.propose queued to the outbox');
 
 // ── inbound validation: sig.key must be bound to from ────────────────────────
 $snap = $node->store()->load();

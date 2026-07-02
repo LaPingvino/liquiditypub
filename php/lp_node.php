@@ -18,6 +18,7 @@ require_once __DIR__ . '/lp_core.php';
 require_once __DIR__ . '/lp_ledger.php';
 require_once __DIR__ . '/lp_store.php';
 require_once __DIR__ . '/lp_federation.php';
+require_once __DIR__ . '/lp_transport.php';
 
 class Node
 {
@@ -26,6 +27,14 @@ class Node
     private Store $store;
     /** @var array node config (base, name, currency, transparency, issuance…) */
     private array $cfg;
+    private ?HttpTransport $transport = null;
+
+    /** setTransport installs an HTTP transport, enabling on-demand identity fetch
+     *  (so a pushed envelope from a not-yet-known peer can be verified). */
+    public function setTransport(HttpTransport $t): void
+    {
+        $this->transport = $t;
+    }
 
     public function __construct(Store $store, array $cfg)
     {
@@ -393,13 +402,107 @@ class Node
         return 'ok';
     }
 
+    // ── HTTP federation (PROTOCOL §5) ─────────────────────────────────────────
+
+    /** registerPeerFromDoc trusts the non-revoked keys in a peer's identity doc (§3). */
+    public function registerPeerFromDoc(array $doc): int
+    {
+        $base = $doc['node']['base'] ?? '';
+        if (!is_string($base) || $base === '') {
+            return 0;
+        }
+        $n = 0;
+        foreach ((array) ($doc['keys'] ?? []) as $k) {
+            if (!empty($k['revoked'])) {
+                continue;
+            }
+            $id = (string) ($k['id'] ?? '');
+            $pub = (string) ($k['public_key'] ?? '');
+            if ($id === '' || $pub === '') {
+                continue;
+            }
+            $this->registerPeerKey($base . LP_IDENTITY_PATH . $id, $pub);
+            $n++;
+        }
+        return $n;
+    }
+
+    /** pullFrom fetches a peer's identity (to learn its keys) and its outbox for us,
+     *  processing every envelope. Returns the count newly accepted. */
+    public function pullFrom(HttpTransport $t, string $peerBase): int
+    {
+        $doc = $t->fetchIdentity($peerBase);
+        if ($doc !== null) {
+            $this->registerPeerFromDoc($doc);
+        }
+        $myHost = self::hostOf((string) $this->cfg['base']);
+        $accepted = 0;
+        foreach ($t->fetchOutbox($peerBase, $myHost) as $env) {
+            if (is_array($env) && $this->processInbound($env, false)['verdict'] === 'ok') {
+                $accepted++;
+            }
+        }
+        return $accepted;
+    }
+
+    /** pushOutboxTo delivers our queued envelopes for a peer to its inbox (§5.2). */
+    public function pushOutboxTo(HttpTransport $t, string $peerBase): int
+    {
+        $host = self::hostOf($peerBase);
+        $sent = 0;
+        foreach ($this->outboxFor($host) as $env) {
+            if ($t->pushInbox($peerBase, $env) === 202) {
+                $sent++;
+            }
+        }
+        return $sent;
+    }
+
+    /** federate runs push+pull with each peer until the exchange settles (no new
+     *  envelopes applied), so a multi-step handshake completes in one call. */
+    public function federate(HttpTransport $t, array $peers, int $maxRounds = 6): array
+    {
+        $applied = 0;
+        $rounds = 0;
+        for ($r = 0; $r < $maxRounds; $r++) {
+            $rounds++;
+            $before = $applied;
+            foreach ($peers as $peer) {
+                $this->pushOutboxTo($t, $peer);
+                $applied += $this->pullFrom($t, $peer);
+            }
+            if ($applied === $before) {
+                break; // quiescent
+            }
+        }
+        return ['applied' => $applied, 'rounds' => $rounds];
+    }
+
+    private function peerBaseForHost(string $host): ?string
+    {
+        foreach (($this->store->load()['contacts'] ?? []) as $c) {
+            if (($c['PeerHost'] ?? '') === $host) {
+                return (string) $c['PeerBase'];
+            }
+        }
+        return null;
+    }
+
+    private function peerBaseForAddr(string $addr): ?string
+    {
+        $at = strpos($addr, '@');
+        return $at === false ? null : $this->peerBaseForHost(substr($addr, $at + 1));
+    }
+
     // ── operator action queue ─────────────────────────────────────────────────
 
     /**
-     * drainActionQueue applies the *local* operator intents the dashboard queued
-     * (run_ud, add_member, deactivate_member) and leaves federation intents
-     * (open_contact, send_transfer, adjust_reserve) in place for the transport
-     * layer. Returns [applied, deferred, errors].
+     * drainActionQueue applies every operator intent the dashboard queued —
+     * local issuance/membership (run_ud, add_member, deactivate_member) and the
+     * federation initiators (open_contact, send_transfer, adjust_reserve), which
+     * write signed envelopes to the outbox for the next federate()/push to
+     * deliver. Returns [applied, deferred, errors]. Call federate() afterwards to
+     * ship the envelopes the federation intents produced.
      */
     public function drainActionQueue(string $queuePath): array
     {
@@ -430,8 +533,28 @@ class Node
                         $this->deactivateMember((string) $it['name']);
                         $applied++;
                         break;
+                    case 'open_contact':
+                        $this->openContact((string) $it['peer_base'], (int) ($it['my_seed_micro'] ?? 0), (string) ($it['note'] ?? ''));
+                        $applied++;
+                        break;
+                    case 'send_transfer':
+                        $peerBase = $this->peerBaseForAddr((string) ($it['to'] ?? ''));
+                        if ($peerBase === null) {
+                            throw new \RuntimeException('no contact for ' . ($it['to'] ?? '?'));
+                        }
+                        $this->startTransfer($peerBase, (string) $it['from_member'], (string) $it['to'], (int) ($it['src_amount_micro'] ?? 0));
+                        $applied++;
+                        break;
+                    case 'adjust_reserve':
+                        $peerBase = $this->peerBaseForHost((string) ($it['peer_host'] ?? ''));
+                        if ($peerBase === null) {
+                            throw new \RuntimeException('no contact for ' . ($it['peer_host'] ?? '?'));
+                        }
+                        $this->adjustReserve($peerBase, (int) ($it['delta_micro'] ?? 0), (string) ($it['memo'] ?? ''));
+                        $applied++;
+                        break;
                     default:
-                        $deferred[] = $it; // needs the federation transport
+                        $deferred[] = $it; // unknown action type
                 }
             } catch (\Throwable $e) {
                 $errors[] = ($it['action'] ?? '?') . ': ' . $e->getMessage();

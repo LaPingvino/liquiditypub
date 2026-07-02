@@ -21,6 +21,7 @@ $cfg = is_file(__DIR__ . '/../config.php')
     : require __DIR__ . '/../config.example.php';
 
 $node = new Node(new Store($cfg['state_file']), $cfg);
+$node->setTransport(new \lp\HttpTransport());
 
 $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
