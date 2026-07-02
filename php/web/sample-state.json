@@ -1,0 +1,276 @@
+{
+  "config": {
+    "_comment": "config is NOT part of the Go `snapshot` struct. In production it comes from the node Config / the published identity document (/.well-known/liquiditypub). The dashboard reads it alongside the snapshot so the operator sees a single, coherent view. Swap sample-state.json for a real snapshot+identity and this block is populated from there.",
+    "name": "Riverside",
+    "description": "A local libre currency for the Riverside neighborhood",
+    "base": "https://riverside.example",
+    "currency_name": "River Credits",
+    "currency_symbol": "ʀ",
+    "c_period_ppm": 274,
+    "ud_period": "P1D",
+    "transparency": "pseudonymous"
+  },
+
+  "own_keys": [
+    {
+      "local_id": "#nk1",
+      "seed": "REDACTED-SECRET-SEED-NEVER-DISPLAYED-abcdef01234",
+      "created": "2026-01-04T00:00:00Z",
+      "revoked": ""
+    }
+  ],
+  "active_key": "#nk1",
+  "created": "2026-01-04T00:00:00Z",
+  "current_ud": 1200000,
+
+  "members": [
+    { "Name": "alice", "DisplayName": "Alice Rivera",  "Weight": 1000000, "Active": true  },
+    { "Name": "bob",   "DisplayName": "Bob Chen",       "Weight": 1000000, "Active": true  },
+    { "Name": "carol", "DisplayName": "Carol Nwosu",    "Weight": 1000000, "Active": true  },
+    { "Name": "dan",   "DisplayName": "Dan O'Brien",    "Weight": 2000000, "Active": true  },
+    { "Name": "eve",   "DisplayName": "Eve Larsson",    "Weight": 1000000, "Active": true  },
+    { "Name": "frank", "DisplayName": "Frank Mbeki",    "Weight": 1000000, "Active": false },
+    { "Name": "grace", "DisplayName": "Grace Kim",      "Weight": 1000000, "Active": true  }
+  ],
+
+  "ledger": [
+    {
+      "seq": 1,
+      "prev": "",
+      "tx": {
+        "id": "urn:uuid:00000000-0000-0000-0000-000000000001",
+        "type": "issuance.grant",
+        "created": "2026-01-04T09:00:00Z",
+        "entries": [
+          { "account": "m:alice", "amount": 50000000 },
+          { "account": "issuance", "amount": -50000000 }
+        ]
+      },
+      "member_sig": null,
+      "hash": "b1u3k9Qm2pXyR7dLfA0sTvHnG4cWz8oEqJ5aYbNcMdI"
+    },
+    {
+      "seq": 2,
+      "prev": "b1u3k9Qm2pXyR7dLfA0sTvHnG4cWz8oEqJ5aYbNcMdI",
+      "tx": {
+        "id": "urn:uuid:00000000-0000-0000-0000-000000000002",
+        "type": "issuance.grant",
+        "created": "2026-01-04T09:05:00Z",
+        "entries": [
+          { "account": "m:bob", "amount": 30000000 },
+          { "account": "issuance", "amount": -30000000 }
+        ]
+      },
+      "member_sig": null,
+      "hash": "c2v4l0Rn3qYzS8eMgB1tUwIoH5dXa9pFrK6bZcOdNeJ2"
+    },
+    {
+      "seq": 3,
+      "prev": "c2v4l0Rn3qYzS8eMgB1tUwIoH5dXa9pFrK6bZcOdNeJ2",
+      "tx": {
+        "id": "urn:uuid:00000000-0000-0000-0000-000000000003",
+        "type": "contact.seed",
+        "created": "2026-02-10T12:00:00Z",
+        "entries": [
+          { "account": "node:hilltop.example", "amount": 500000000 },
+          { "account": "issuance", "amount": -500000000 }
+        ]
+      },
+      "member_sig": null,
+      "hash": "d3w5m1So4rZaT9fNhC2uVxJpI6eYb0qGsL7caDePeOfK3"
+    },
+    {
+      "seq": 4,
+      "prev": "d3w5m1So4rZaT9fNhC2uVxJpI6eYb0qGsL7caDePeOfK3",
+      "tx": {
+        "id": "urn:uuid:00000000-0000-0000-0000-000000000004",
+        "type": "contact.seed",
+        "created": "2026-03-01T12:00:00Z",
+        "entries": [
+          { "account": "node:meadow.example", "amount": 200000000 },
+          { "account": "issuance", "amount": -200000000 }
+        ]
+      },
+      "member_sig": null,
+      "hash": "e4x6n2Tp5saUb0gOiD3vWyKqJ7fZc1rHtM8dbEfQfPgL4"
+    },
+    {
+      "seq": 5,
+      "prev": "e4x6n2Tp5saUb0gOiD3vWyKqJ7fZc1rHtM8dbEfQfPgL4",
+      "tx": {
+        "id": "urn:uuid:00000000-0000-0000-0000-000000000005",
+        "type": "issuance.ud",
+        "created": "2026-06-30T00:00:00Z",
+        "entries": [
+          { "account": "m:alice", "amount": 1200000 },
+          { "account": "m:bob", "amount": 1200000 },
+          { "account": "m:carol", "amount": 1200000 },
+          { "account": "m:dan", "amount": 2400000 },
+          { "account": "m:eve", "amount": 1200000 },
+          { "account": "m:grace", "amount": 1200000 },
+          { "account": "issuance", "amount": -8400000 }
+        ]
+      },
+      "member_sig": null,
+      "hash": "f5y7o3Uq6tbVc1hPjE4wXzLrK8gad2sIuN9ecFgRgQhM5"
+    },
+    {
+      "seq": 6,
+      "prev": "f5y7o3Uq6tbVc1hPjE4wXzLrK8gad2sIuN9ecFgRgQhM5",
+      "tx": {
+        "id": "urn:uuid:00000000-0000-0000-0000-000000000006",
+        "type": "payment",
+        "created": "2026-06-30T14:22:00Z",
+        "entries": [
+          { "account": "m:alice", "amount": -10000000 },
+          { "account": "m:bob", "amount": 10000000 }
+        ]
+      },
+      "member_sig": null,
+      "hash": "g6z8p4Vr7ucWd2iQkF5xYaMsL9hbe3tJvO0fdGhShRiN6"
+    },
+    {
+      "seq": 7,
+      "prev": "g6z8p4Vr7ucWd2iQkF5xYaMsL9hbe3tJvO0fdGhShRiN6",
+      "tx": {
+        "id": "urn:uuid:00000000-0000-0000-0000-000000000007",
+        "type": "transfer.out",
+        "ref": "urn:uuid:transfer-0001",
+        "created": "2026-07-01T10:15:00Z",
+        "entries": [
+          { "account": "m:carol", "amount": -5000000 },
+          { "account": "node:hilltop.example", "amount": 5000000 }
+        ]
+      },
+      "member_sig": null,
+      "hash": "h7a9q5Ws8vdXe3jRlG6yZbNtM0icf4uKwP1geHiTiSjO7"
+    },
+    {
+      "seq": 8,
+      "prev": "h7a9q5Ws8vdXe3jRlG6yZbNtM0icf4uKwP1geHiTiSjO7",
+      "tx": {
+        "id": "urn:uuid:00000000-0000-0000-0000-000000000008",
+        "type": "transfer.in",
+        "ref": "urn:uuid:transfer-0002",
+        "created": "2026-07-01T18:40:00Z",
+        "entries": [
+          { "account": "node:meadow.example", "amount": -3000000 },
+          { "account": "m:dan", "amount": 3000000 }
+        ]
+      },
+      "member_sig": null,
+      "hash": "i8b0r6Xt9weYf4kSmH7zAcOuN1jdg5vLxQ2hfIjUjTkP8"
+    }
+  ],
+
+  "contacts": [
+    {
+      "ID": "urn:uuid:contact-hilltop",
+      "PeerBase": "https://hilltop.example",
+      "PeerHost": "hilltop.example",
+      "IAmProposer": true,
+      "Active": true,
+      "Closed": false,
+      "ProposerSeed": 500000000,
+      "ResponderSeed": 510000000,
+      "MyReserveOfPeer": 505000000,
+      "PeerReserveOfMe": 510000000,
+      "OpSeq": 1,
+      "ChannelRoot": [211,45,9,178,64,7,251,32,144,88,17,220,190,3,77,201,150,240,12,66,99,181,7,44,255,130,19,88,240,11,73,201],
+      "Roots": [
+        "0y0JskAH-yCQWBHcvgNNyZbwDEJjtQcs_4ITWPALSck",
+        "tQcs4ITWPALSck0y0JskAH-yCQWBHcvgNNyZbwDEJj9x"
+      ],
+      "Busy": false,
+      "BusyTransfer": "",
+      "PendingAdjustID": "",
+      "PendingAdjustDelta": 0,
+      "AppliedAdjusts": {},
+      "Diverged": false
+    },
+    {
+      "ID": "urn:uuid:contact-meadow",
+      "PeerBase": "https://meadow.example",
+      "PeerHost": "meadow.example",
+      "IAmProposer": false,
+      "Active": true,
+      "Closed": false,
+      "ProposerSeed": 200000000,
+      "ResponderSeed": 200000000,
+      "MyReserveOfPeer": 197000000,
+      "PeerReserveOfMe": 200000000,
+      "OpSeq": 1,
+      "ChannelRoot": [88,240,11,73,201,150,240,12,66,99,181,7,44,255,130,19,211,45,9,178,64,7,251,32,144,88,17,220,190,3,77,201],
+      "Roots": [
+        "WPALSck0y0JskAH-yCQWBHcvgNNyZbwDEJjtQcs_4IT9x",
+        "vgNNyZbwDEJjtQcs_4ITWPALSck0y0JskAH-yCQWBHc7z"
+      ],
+      "Busy": true,
+      "BusyTransfer": "urn:uuid:transfer-0003",
+      "PendingAdjustID": "",
+      "PendingAdjustDelta": 0,
+      "AppliedAdjusts": {},
+      "Diverged": false
+    }
+  ],
+
+  "transfers": [
+    {
+      "ID": "urn:uuid:transfer-0001",
+      "ContactID": "urn:uuid:contact-hilltop",
+      "Outgoing": true,
+      "State": "SETTLED",
+      "OpSeq": 1,
+      "FromMember": "carol",
+      "ToMember": "dan@hilltop.example",
+      "SrcAmount": 5000000,
+      "DstAmount": 5100000,
+      "Expires": "2026-07-01T10:20:00Z",
+      "MyEntry": { "LogSeq": 7, "LogHash": "h7a9q5Ws8vdXe3jRlG6yZbNtM0icf4uKwP1geHiTiSjO7" },
+      "PeerEntry": { "LogSeq": 812, "LogHash": "pEeRhAsHhIlLtOp0001aBcDeFgHiJkLmNoPqRsTuVwXy" },
+      "Receipt": null
+    },
+    {
+      "ID": "urn:uuid:transfer-0002",
+      "ContactID": "urn:uuid:contact-meadow",
+      "Outgoing": false,
+      "State": "SETTLED",
+      "OpSeq": 1,
+      "FromMember": "eve@meadow.example",
+      "ToMember": "dan",
+      "SrcAmount": 3000000,
+      "DstAmount": 3000000,
+      "Expires": "2026-07-01T18:45:00Z",
+      "MyEntry": { "LogSeq": 8, "LogHash": "i8b0r6Xt9weYf4kSmH7zAcOuN1jdg5vLxQ2hfIjUjTkP8" },
+      "PeerEntry": { "LogSeq": 431, "LogHash": "pEeRhAsHmEaDoW0002aBcDeFgHiJkLmNoPqRsTuVwXyZ" },
+      "Receipt": null
+    },
+    {
+      "ID": "urn:uuid:transfer-0003",
+      "ContactID": "urn:uuid:contact-meadow",
+      "Outgoing": true,
+      "State": "PROPOSED",
+      "OpSeq": 1,
+      "FromMember": "grace",
+      "ToMember": "frank@meadow.example",
+      "SrcAmount": 2000000,
+      "DstAmount": 1980000,
+      "Expires": "2026-07-02T12:05:00Z",
+      "MyEntry": null,
+      "PeerEntry": null,
+      "Receipt": null
+    }
+  ],
+
+  "out_seq": { "hilltop.example": 14, "meadow.example": 9 },
+  "inbound": {
+    "hilltop.example": { "seen_ids": ["urn:uuid:seen-a", "urn:uuid:seen-b"], "last_seq": 812 },
+    "meadow.example": { "seen_ids": ["urn:uuid:seen-c"], "last_seq": 431 }
+  },
+  "outbox": { "hilltop.example": [], "meadow.example": [] },
+  "peer_keys": {
+    "riverside.example#nk1": "cHVia2V5cml2ZXJzaWRlbmsxMDAwMDAwMDAwMDAwMDAw",
+    "hilltop.example#hk1": "cHVia2V5aGlsbHRvcGhrMTAwMDAwMDAwMDAwMDAwMDAw",
+    "meadow.example#mk1": "cHVia2V5bWVhZG93bWsxMDAwMDAwMDAwMDAwMDAwMDAw"
+  }
+}
