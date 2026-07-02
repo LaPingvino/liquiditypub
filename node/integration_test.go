@@ -1,0 +1,249 @@
+package lpnode_test
+
+import (
+	"net/url"
+	"testing"
+	"time"
+
+	"github.com/LaPingvino/liquiditypub/conformance"
+	lpnode "github.com/LaPingvino/liquiditypub/node"
+	"github.com/LaPingvino/liquiditypub/node/ledger"
+)
+
+// bus is an in-process Sender: it delivers envelopes by calling the target
+// node's ProcessInbound directly, exercising the full protocol logic without
+// HTTP. Delivery is synchronous within the caller's worker goroutine, matching
+// the real transport's ordering guarantees.
+type bus struct {
+	byBase map[string]*lpnode.Node
+}
+
+func hostOf(base string) string {
+	u, err := url.Parse(base)
+	if err == nil && u.Host != "" {
+		return u.Host
+	}
+	return base
+}
+
+func (b *bus) Deliver(peerBase string, env map[string]any) error {
+	if n := b.byBase[peerBase]; n != nil {
+		n.ProcessInbound(env)
+	}
+	return nil
+}
+
+func (b *bus) FetchIdentity(peerBase string) (map[string]any, error) {
+	return b.byBase[peerBase].IdentityDoc(), nil
+}
+
+func twoNodes(t *testing.T) (a, b *lpnode.Node, baseA, baseB string) {
+	t.Helper()
+	baseA, baseB = "https://riverside.example", "https://hilltop.example"
+	var err error
+	a, err = lpnode.NewNode(lpnode.Config{
+		Base: baseA, Name: "Riverside", CurrencyName: "River", CurrencySymbol: "R",
+		CPeriodPpm: 274, UDPeriod: "P1D", GenesisUD: 1_000_000,
+		AutoAcceptSeed: 500_000_000,
+		Members:        []lpnode.MemberConfig{{Name: "alice", Grant: 100_000_000}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err = lpnode.NewNode(lpnode.Config{
+		Base: baseB, Name: "Hilltop", CurrencyName: "Hill", CurrencySymbol: "H",
+		CPeriodPpm: 274, UDPeriod: "P1D", GenesisUD: 1_000_000,
+		AutoAcceptSeed: 500_000_000,
+		Members:        []lpnode.MemberConfig{{Name: "bob", Grant: 100_000_000}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := &bus{byBase: map[string]*lpnode.Node{baseA: a, baseB: b}}
+	a.SetSender(shared)
+	b.SetSender(shared)
+	a.Start()
+	b.Start()
+	return
+}
+
+func waitFor(t *testing.T, d time.Duration, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if !cond() {
+		t.Fatalf("condition not met within %s", d)
+	}
+}
+
+func TestTwoNodeRoundTrip(t *testing.T) {
+	a, b, baseA, baseB := twoNodes(t)
+
+	if _, err := a.OpenContact(baseB, 500_000_000, "market overlap"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, func() bool {
+		return a.ContactActive(baseB) && b.ContactActive(baseA)
+	})
+
+	// Replay the pool math independently to prove reserves are a pure function
+	// of the op history (PROTOCOL §8.1) and that both nodes agree.
+	// Riverside custodies node:hilltop = 500M (R); Riverside's reserve at
+	// Hilltop = 500M (H). From Riverside's view: MyReserveOfPeer=500M,
+	// PeerReserveOfMe=500M.
+	rMyOfPeer, rPeerOfMe := int64(500_000_000), int64(500_000_000)
+
+	// Transfer 1: alice -> bob, 10M R.
+	src1 := int64(10_000_000)
+	wantDst1, err := conformance.PoolPrice(rMyOfPeer, rPeerOfMe, src1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t1, err := a.StartTransfer(baseB, "alice@"+a.Host(), "bob@"+b.Host(), src1, "veggie box")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, func() bool { return a.TransferState(t1) == "SETTLED" })
+	waitFor(t, 2*time.Second, func() bool { return b.TransferState(t1) == "SETTLED" })
+	rMyOfPeer += src1
+	rPeerOfMe -= wantDst1
+
+	// Transfer 2: bob -> alice, 7M H. From Riverside's view it is incoming, so
+	// the roles of the two reserves swap in the formula.
+	src2 := int64(7_000_000)
+	// Hilltop is source; its MyReserveOfPeer (node:riverside on Hilltop) and
+	// PeerReserveOfMe mirror Riverside's two reserves.
+	hMyOfPeer := rPeerOfMe // node:riverside on Hilltop == Riverside's reserve at Hilltop
+	hPeerOfMe := rMyOfPeer // Hilltop's reserve at Riverside == node:hilltop on Riverside
+	wantDst2, err := conformance.PoolPrice(hMyOfPeer, hPeerOfMe, src2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t2, err := b.StartTransfer(baseA, "bob@"+b.Host(), "alice@"+a.Host(), src2, "return favor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, func() bool { return b.TransferState(t2) == "SETTLED" })
+	waitFor(t, 2*time.Second, func() bool { return a.TransferState(t2) == "SETTLED" })
+	// Apply on Riverside's view: incoming grows PeerReserveOfMe, shrinks MyReserveOfPeer.
+	rPeerOfMe += src2
+	rMyOfPeer -= wantDst2
+
+	// Node wallet (authoritative custody) must equal the replayed reserve.
+	if got := a.Balance(ledger.NodeWalletPrefix + b.Host()); got != rMyOfPeer {
+		t.Errorf("Riverside node:hilltop = %d, replay = %d", got, rMyOfPeer)
+	}
+	if got := b.Balance(ledger.NodeWalletPrefix + a.Host()); got != rPeerOfMe {
+		t.Errorf("Hilltop node:riverside = %d, replay = %d", got, rPeerOfMe)
+	}
+
+	// Checkpoints must agree on op_seq and channel_root (reconciliation, §8.3).
+	va, _ := a.ContactByPeer(baseB)
+	vb, _ := b.ContactByPeer(baseA)
+	if va.OpSeq != vb.OpSeq || va.OpSeq != 2 {
+		t.Errorf("op_seq mismatch: A=%d B=%d (want 2)", va.OpSeq, vb.OpSeq)
+	}
+	if va.ChannelRoot != vb.ChannelRoot {
+		t.Errorf("channel root divergence:\n A=%s\n B=%s", va.ChannelRoot, vb.ChannelRoot)
+	}
+
+	// Both ledgers: hash chain + conservation + non-negative node wallets.
+	if err := a.Ledger().VerifyChain(); err != nil {
+		t.Errorf("Riverside ledger: %v", err)
+	}
+	if err := b.Ledger().VerifyChain(); err != nil {
+		t.Errorf("Hilltop ledger: %v", err)
+	}
+}
+
+// TestReplayIdempotent re-delivers an already-processed envelope and asserts the
+// receiver treats it as a duplicate without re-applying (PROTOCOL §4).
+func TestReplayIdempotent(t *testing.T) {
+	a, b, baseA, baseB := twoNodes(t)
+	if _, err := a.OpenContact(baseB, 500_000_000, ""); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, func() bool { return a.ContactActive(baseB) && b.ContactActive(baseA) })
+	t1, err := a.StartTransfer(baseB, "alice@"+a.Host(), "bob@"+b.Host(), 10_000_000, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, func() bool { return b.TransferState(t1) == "SETTLED" })
+
+	// Grab the commit envelope Riverside sent to Hilltop and replay it.
+	var commit map[string]any
+	for _, env := range a.OutboxFor(b.Host()) {
+		if env["type"] == "transfer.commit" {
+			commit = env
+		}
+	}
+	if commit == nil {
+		t.Fatal("no commit envelope found in outbox")
+	}
+	beforeLen := b.Ledger().Len()
+	beforeReserve := b.Balance(ledger.NodeWalletPrefix + a.Host())
+
+	if verdict := b.ProcessInbound(commit); verdict != conformance.VerdictDuplicate {
+		t.Errorf("replayed commit verdict = %q, want duplicate", verdict)
+	}
+	if b.Ledger().Len() != beforeLen {
+		t.Errorf("replay changed ledger length %d -> %d", beforeLen, b.Ledger().Len())
+	}
+	if got := b.Balance(ledger.NodeWalletPrefix + a.Host()); got != beforeReserve {
+		t.Errorf("replay changed reserve %d -> %d", beforeReserve, got)
+	}
+}
+
+// TestContactSerialization asserts a second transfer is refused while the first
+// still holds the contact (PROTOCOL §6.3). We freeze delivery by using a sender
+// that drops the propose, so the contact stays busy.
+func TestContactSerialization(t *testing.T) {
+	baseA, baseB := "https://a.example", "https://b.example"
+	a, err := lpnode.NewNode(lpnode.Config{
+		Base: baseA, Name: "A", CurrencyName: "A", CurrencySymbol: "A",
+		CPeriodPpm: 274, UDPeriod: "P1D", GenesisUD: 1_000_000, AutoAcceptSeed: 500_000_000,
+		Members: []lpnode.MemberConfig{{Name: "alice", Grant: 100_000_000}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := lpnode.NewNode(lpnode.Config{
+		Base: baseB, Name: "B", CurrencyName: "B", CurrencySymbol: "B",
+		CPeriodPpm: 274, UDPeriod: "P1D", GenesisUD: 1_000_000, AutoAcceptSeed: 500_000_000,
+		Members: []lpnode.MemberConfig{{Name: "bob", Grant: 100_000_000}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := &bus{byBase: map[string]*lpnode.Node{baseA: a, baseB: b}}
+	a.SetSender(shared)
+	b.SetSender(shared)
+	a.Start()
+	b.Start()
+	if _, err := a.OpenContact(baseB, 500_000_000, ""); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, func() bool { return a.ContactActive(baseB) })
+
+	// Swap in a black-hole sender so the first propose never reaches B; the
+	// contact on A stays busy.
+	a.SetSender(blackhole{})
+	if _, err := a.StartTransfer(baseB, "alice@a.example", "bob@b.example", 10_000_000, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.StartTransfer(baseB, "alice@a.example", "bob@b.example", 5_000_000, ""); err == nil {
+		t.Error("second concurrent transfer should be refused (contact busy)")
+	}
+}
+
+type blackhole struct{}
+
+func (blackhole) Deliver(string, map[string]any) error         { return nil }
+func (blackhole) FetchIdentity(string) (map[string]any, error) { return map[string]any{}, nil }
+
+var _ = hostOf
