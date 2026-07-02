@@ -39,6 +39,7 @@ func (n *Node) PollAll() {
 	for _, base := range n.openPeerBases() {
 		_, _ = n.PollPeer(base)
 		_, _ = n.ReconcilePeer(base)
+		_, _, _ = n.RefreshPeerKeys(base) // enforce key revocation (§3, §13)
 	}
 }
 

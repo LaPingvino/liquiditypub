@@ -78,9 +78,9 @@ go run ./cmd/lpconform http://127.0.0.1:8091 http://127.0.0.1:8092
   the channel hash as an operation.
 - Key rotation (§3, `Node.RotateKey`/`RevokeKey`, `key.announce`) and
   `contact.close`/`contact.update` (§6) are implemented, keyring persisted.
-  Verifier-side revocation enforcement (pruning a peer's revoked key) still
-  relies on out-of-band re-verification per §13 — a node does not yet
-  auto-refetch a peer identity doc to drop revoked keys.
+  Verifier-side revocation is enforced (§3, §13): `RefreshPeerKeys` (run on each
+  poll cycle) re-fetches a peer's identity doc and drops keys it now marks
+  revoked or has dropped, so a stolen-then-revoked key stops validating.
 - Transfer expiry (§7.4) is enforced: `StartExpirySweeper` (run by `serve`) and
   inline checks on the busy-guards move a stalled pre-commit transfer to EXPIRED
   and release the contact lock, so a dropped accept/commit can't pin a contact.

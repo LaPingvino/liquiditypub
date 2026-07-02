@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -126,4 +127,63 @@ func (n *Node) handleKeyAnnounce(env map[string]any) map[string]any {
 	}
 	n.peerKeys[keyID(fromBase, localID)] = pub
 	return nil // acknowledged by acceptance; no reply required
+}
+
+// RefreshPeerKeys re-fetches a peer's identity document and reconciles our view
+// of its keys to it: newly listed keys are added, and keys the peer now marks
+// revoked (or has dropped entirely) are removed — enforcing revocation on the
+// verifier side (§3, §13). Only that peer's keys are touched. On a fetch
+// failure nothing is pruned, so a transient outage cannot drop valid keys.
+func (n *Node) RefreshPeerKeys(peerBase string) (added, removed int, err error) {
+	s := n.sender()
+	if s == nil {
+		return 0, 0, nil
+	}
+	doc, err := s.FetchIdentity(peerBase)
+	if err != nil {
+		return 0, 0, err
+	}
+	base := peerBase
+	if nd, ok := doc["node"].(map[string]any); ok {
+		if b, ok := nd["base"].(string); ok && b != "" {
+			base = b
+		}
+	}
+	keys, _ := doc["keys"].([]any)
+	valid := map[string]ed25519.PublicKey{}
+	for _, k := range keys {
+		km, ok := k.(map[string]any)
+		if !ok || km["revoked"] != nil {
+			continue
+		}
+		id, _ := km["id"].(string)
+		pubStr, _ := km["public_key"].(string)
+		pub, err := mustParseKey(pubStr)
+		if err != nil {
+			continue
+		}
+		valid[keyID(base, id)] = pub
+	}
+
+	prefix := base + identityPath + "#"
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	for kid := range n.peerKeys {
+		if strings.HasPrefix(kid, prefix) {
+			if _, ok := valid[kid]; !ok {
+				delete(n.peerKeys, kid)
+				removed++
+			}
+		}
+	}
+	for kid, pub := range valid {
+		if _, ok := n.peerKeys[kid]; !ok {
+			n.peerKeys[kid] = pub
+			added++
+		}
+	}
+	if added > 0 || removed > 0 {
+		_ = n.persistLocked()
+	}
+	return added, removed, nil
 }

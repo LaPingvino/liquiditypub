@@ -1,5 +1,20 @@
 package lpnode
 
+import "sort"
+
+// PeerKeyIDs returns the fully-qualified ids of every key this node currently
+// trusts for verification (own + peers), sorted. Intended for tests/inspection.
+func (n *Node) PeerKeyIDs() []string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	out := make([]string, 0, len(n.peerKeys))
+	for k := range n.peerKeys {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // Host returns the node's own bare host (used to address local members).
 func (n *Node) Host() string { return host(n.cfg.Base) }
 

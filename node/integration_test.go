@@ -656,6 +656,54 @@ func TestKeyringPersists(t *testing.T) {
 	}
 }
 
+// TestRevocationEnforcement asserts a node drops a peer's revoked key when it
+// re-checks the peer's identity document (PROTOCOL §3, §13).
+func TestRevocationEnforcement(t *testing.T) {
+	a, b, baseA, baseB := twoNodes(t)
+	if _, err := a.OpenContact(baseB, 500_000_000, ""); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, func() bool { return a.ContactActive(baseB) && b.ContactActive(baseA) })
+
+	oldKey := baseB + "/.well-known/liquiditypub#nk1"
+	newKey := baseB + "/.well-known/liquiditypub#nk2"
+	if !contains(a.PeerKeyIDs(), oldKey) {
+		t.Fatalf("a should know b's original key %q", oldKey)
+	}
+
+	// b rotates to #nk2, then revokes the retired #nk1.
+	if _, err := b.RotateKey(); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.RevokeKey("#nk1"); err != nil {
+		t.Fatal(err)
+	}
+
+	added, removed, err := a.RefreshPeerKeys(baseB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed < 1 {
+		t.Errorf("expected the revoked key to be pruned, removed=%d added=%d", removed, added)
+	}
+	ids := a.PeerKeyIDs()
+	if contains(ids, oldKey) {
+		t.Error("revoked key #nk1 still trusted after refresh")
+	}
+	if !contains(ids, newKey) {
+		t.Error("rotated key #nk2 not trusted after refresh")
+	}
+}
+
+func contains(xs []string, x string) bool {
+	for _, v := range xs {
+		if v == x {
+			return true
+		}
+	}
+	return false
+}
+
 // TestContactClose freezes a contact and asserts new operations are refused
 // while reserves survive (PROTOCOL §6).
 func TestContactClose(t *testing.T) {
