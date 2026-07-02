@@ -11,6 +11,7 @@ import (
 	lpnode "github.com/LaPingvino/liquiditypub/node"
 	"github.com/LaPingvino/liquiditypub/node/fed"
 	"github.com/LaPingvino/liquiditypub/node/httpapi"
+	"github.com/LaPingvino/liquiditypub/node/store"
 )
 
 // runServe starts one long-running node, reachable at -base, so lpconform and
@@ -27,6 +28,7 @@ func runServe(args []string) error {
 	peer := fs.String("peer", "", "on startup, open a contact to this peer base URL")
 	udTick := fs.Bool("ud", false, "issue one UD period on startup")
 	pull := fs.Duration("pull", 0, "if >0, poll peer outboxes at this cadence (pull baseline, §5.1)")
+	state := fs.String("state", "", "path to a JSON state file for crash-safe persistence + resume")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -48,14 +50,26 @@ func runServe(args []string) error {
 		mcfg = append(mcfg, lpnode.MemberConfig{Name: nm, Grant: grant})
 	}
 
-	n, err := lpnode.NewNode(lpnode.Config{
+	cfg := lpnode.Config{
 		Base: *base, Name: *name, Description: *name + " (lpnode serve)",
 		CurrencyName: *currency, CurrencySymbol: *symbol,
 		CPeriodPpm: 274, UDPeriod: "P1D", GenesisUD: 1_000_000,
 		AutoAcceptSeed: *seed, Members: mcfg,
-	})
-	if err != nil {
-		return err
+	}
+	var n *lpnode.Node
+	var err error
+	if *state != "" {
+		// Resume from the state file if it exists, else create + persist.
+		n, err = lpnode.Restore(cfg, store.NewFile(*state))
+		if err != nil {
+			return err
+		}
+		fmt.Printf("  state: persisting to %s\n", *state)
+	} else {
+		n, err = lpnode.NewNode(cfg)
+		if err != nil {
+			return err
+		}
 	}
 	n.SetSender(fed.New())
 	n.Start()

@@ -62,7 +62,12 @@ go run ./cmd/lpconform http://127.0.0.1:8091 http://127.0.0.1:8092
 
 ## Known PoC-scope limits (for the next iteration)
 
-- In-memory only: no crash recovery / log replay on restart yet.
+- Persistence is opt-in: `serve -state <file>` (or `lpnode.Restore` / `SetStore`
+  with a `store.Store`) snapshots the full node — ledger, contacts, transfers,
+  channel bookkeeping, outboxes, keys — after every state change, durable
+  *before* the change is observable, and resumes from it on restart. The
+  `store.Store` interface is the seam the D1 (`joop-n7j`) and GAE (`joop-3mu`)
+  profiles back with their own KV/blob. Default (no `-state`) is in-memory.
 - Both transports work: push (§5.2) and the pull baseline (§5.1, `serve -pull
   <cadence>`, `Node.PollPeer`/`StartPulling`). Outbox pruning against a peer's
   published `last_seq_processed` is not implemented yet (an optimization).

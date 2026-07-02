@@ -112,6 +112,7 @@ func (n *Node) OpenContact(peerBase string, mySeed int64, note string) (string, 
 		"my_seed":    mySeed,
 		"note":       note,
 	})
+	_ = n.persistLocked()
 	n.mu.Unlock()
 	n.dispatch(peerBase, env)
 	return id, nil

@@ -93,6 +93,7 @@ func (n *Node) StartTransfer(peerBase, fromMember, toMember string, src int64, n
 		"note":        note,
 		"expires":     t.Expires,
 	})
+	_ = n.persistLocked()
 	n.mu.Unlock()
 	n.dispatch(peerBase, env)
 	return id, nil

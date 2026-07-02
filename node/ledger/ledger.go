@@ -77,6 +77,22 @@ func New() *Ledger {
 	return &Ledger{balances: map[string]int64{}}
 }
 
+// Load rebuilds a ledger from a persisted record slice, verifying the hash
+// chain and conservation before deriving balances. A tampered or truncated log
+// is rejected, so a node never resumes on a corrupt ledger.
+func Load(records []Record) (*Ledger, error) {
+	l := &Ledger{balances: map[string]int64{}, log: records}
+	if err := l.VerifyChain(); err != nil {
+		return nil, err
+	}
+	for _, rec := range records {
+		for _, e := range rec.Tx.Entries {
+			l.balances[e.Account] += e.Amount
+		}
+	}
+	return l, nil
+}
+
 // Balance returns an account's current balance (0 if never touched).
 func (l *Ledger) Balance(account string) int64 { return l.balances[account] }
 

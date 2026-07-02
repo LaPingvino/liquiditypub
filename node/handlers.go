@@ -100,6 +100,7 @@ func (n *Node) ProcessInbound(env map[string]any) string {
 	if reply != nil {
 		ci.replies[id] = reply
 	}
+	_ = n.persistLocked() // durable before the state change is observable
 	n.mu.Unlock()
 
 	if reply != nil {

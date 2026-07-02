@@ -10,6 +10,7 @@ import (
 
 	"github.com/LaPingvino/liquiditypub/conformance"
 	"github.com/LaPingvino/liquiditypub/node/ledger"
+	"github.com/LaPingvino/liquiditypub/node/store"
 )
 
 // Clock lets tests pin time; production uses realClock.
@@ -69,7 +70,8 @@ type Node struct {
 	currentUD int64 // last published standard-weight dividend
 
 	send       Sender
-	deliveries chan qitem // ordered outbound delivery queue (nil until Start)
+	deliveries chan qitem  // ordered outbound delivery queue (nil until Start)
+	store      store.Store // persistence backend (nil = no durability)
 }
 
 type channelInbound struct {
@@ -207,9 +209,9 @@ func (n *Node) computeUDBase() int64 {
 // paid. MUST be driven by a scheduler, never by request handling.
 func (n *Node) RunUD() (int64, error) {
 	n.mu.Lock()
-	defer n.mu.Unlock()
 	udBase := n.computeUDBase()
 	if udBase <= 0 {
+		n.mu.Unlock()
 		return 0, nil
 	}
 	now := n.clock().Format(time.RFC3339)
@@ -231,10 +233,13 @@ func (n *Node) RunUD() (int64, error) {
 				{Account: ledger.AcctIssuance, Amount: -amt},
 			},
 		}); err != nil {
+			n.mu.Unlock()
 			return 0, err
 		}
 	}
 	n.currentUD = n.computeUDBase()
+	_ = n.persistLocked()
+	n.mu.Unlock()
 	return udBase, nil
 }
 

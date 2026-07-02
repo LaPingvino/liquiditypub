@@ -8,6 +8,7 @@ import (
 	"github.com/LaPingvino/liquiditypub/conformance"
 	lpnode "github.com/LaPingvino/liquiditypub/node"
 	"github.com/LaPingvino/liquiditypub/node/ledger"
+	"github.com/LaPingvino/liquiditypub/node/store"
 )
 
 // bus is an in-process Sender: it delivers envelopes by calling the target
@@ -328,6 +329,91 @@ func TestPullOnlyFederation(t *testing.T) {
 	}
 	if err := b.Ledger().VerifyChain(); err != nil {
 		t.Error(err)
+	}
+}
+
+// TestRestartReplay persists a node through a contact + transfer, rebuilds it
+// from the store, and asserts the resumed node has identical state and can
+// keep transacting.
+func TestRestartReplay(t *testing.T) {
+	dir := t.TempDir()
+	st := store.NewFile(dir + "/riverside.json")
+	baseA, baseB := "https://riverside.example", "https://hilltop.example"
+	cfgA := lpnode.Config{
+		Base: baseA, Name: "Riverside", CurrencyName: "River", CurrencySymbol: "R",
+		CPeriodPpm: 274, UDPeriod: "P1D", GenesisUD: 1_000_000, AutoAcceptSeed: 500_000_000,
+		Members: []lpnode.MemberConfig{{Name: "alice", Grant: 100_000_000}},
+	}
+	a, err := lpnode.Restore(cfgA, st) // fresh: store is empty
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := lpnode.NewNode(lpnode.Config{
+		Base: baseB, Name: "Hilltop", CurrencyName: "Hill", CurrencySymbol: "H",
+		CPeriodPpm: 274, UDPeriod: "P1D", GenesisUD: 1_000_000, AutoAcceptSeed: 500_000_000,
+		Members: []lpnode.MemberConfig{{Name: "bob", Grant: 100_000_000}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bus1 := &bus{byBase: map[string]*lpnode.Node{baseA: a, baseB: b}}
+	a.SetSender(bus1)
+	b.SetSender(bus1)
+	a.Start()
+	b.Start()
+
+	if _, err := a.OpenContact(baseB, 500_000_000, ""); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, func() bool { return a.ContactActive(baseB) && b.ContactActive(baseA) })
+	t1, err := a.StartTransfer(baseB, "alice@"+a.Host(), "bob@"+b.Host(), 10_000_000, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, func() bool { return a.TransferState(t1) == "SETTLED" })
+
+	// Snapshot the pre-restart state we expect to survive.
+	wantReserve := a.Balance(ledger.NodeWalletPrefix + b.Host())
+	wantView, _ := a.ContactByPeer(baseB)
+	wantCP := a.Checkpoint()
+
+	// Restart Riverside from the store as a brand-new object.
+	a2, err := lpnode.Restore(cfgA, st)
+	if err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if got := a2.Balance(ledger.NodeWalletPrefix + b.Host()); got != wantReserve {
+		t.Errorf("reserve after restart = %d, want %d", got, wantReserve)
+	}
+	gotView, ok := a2.ContactByPeer(baseB)
+	if !ok || gotView.OpSeq != wantView.OpSeq || gotView.ChannelRoot != wantView.ChannelRoot {
+		t.Errorf("contact after restart = %+v, want opSeq=%d root=%s", gotView, wantView.OpSeq, wantView.ChannelRoot)
+	}
+	if a2.TransferState(t1) != "SETTLED" {
+		t.Errorf("transfer state after restart = %q, want SETTLED", a2.TransferState(t1))
+	}
+	if err := a2.Ledger().VerifyChain(); err != nil {
+		t.Errorf("restored ledger invalid: %v", err)
+	}
+	// Checkpoint log_hash must be byte-identical across the restart.
+	if a2.Checkpoint()["log_hash"] != wantCP["log_hash"] {
+		t.Errorf("log_hash changed across restart")
+	}
+
+	// Prove the resumed node still transacts: rewire the bus to a2 and send.
+	bus2 := &bus{byBase: map[string]*lpnode.Node{baseA: a2, baseB: b}}
+	a2.SetSender(bus2)
+	b.SetSender(bus2)
+	a2.Start()
+	t2, err := a2.StartTransfer(baseB, "alice@"+a2.Host(), "bob@"+b.Host(), 5_000_000, "post-restart")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, func() bool { return a2.TransferState(t2) == "SETTLED" })
+	va, _ := a2.ContactByPeer(baseB)
+	vb, _ := b.ContactByPeer(baseA)
+	if va.OpSeq != vb.OpSeq || va.ChannelRoot != vb.ChannelRoot {
+		t.Errorf("post-restart reconciliation mismatch: A(%d) B(%d)", va.OpSeq, vb.OpSeq)
 	}
 }
 
