@@ -66,3 +66,18 @@ func (n *Node) Balance(account string) int64 {
 	defer n.mu.Unlock()
 	return n.led.Balance(account)
 }
+
+// Transparency returns the node's transparency level (§9.3).
+func (n *Node) Transparency() string { return n.cfg.Transparency }
+
+// IsActivePeer reports whether the given base URL or host is an active,
+// non-closed contact peer — used to gate "peers"-level log access (§9.3).
+func (n *Node) IsActivePeer(peerBaseOrHost string) bool {
+	if peerBaseOrHost == "" {
+		return false
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	c := n.contactByHost[host(peerBaseOrHost)]
+	return c != nil && c.Active && !c.Closed
+}

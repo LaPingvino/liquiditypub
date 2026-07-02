@@ -104,45 +104,59 @@ func (n *Node) StartTransfer(peerBase, fromMember, toMember string, src int64, n
 	return id, nil
 }
 
+// rejectTransfer answers a proposal with transfer.reject (§7.2), so the payer's
+// state machine advances to REJECTED and releases its contact lock — unlike a
+// generic error, which would leave the payer stuck in PROPOSED until expiry.
+func (n *Node) rejectTransfer(env map[string]any, transferID, code, detail string) map[string]any {
+	return n.buildSigned("transfer.reject", envStr(env, "from"), envStr(env, "id"), map[string]any{
+		"transfer_id": transferID,
+		"code":        code,
+		"detail":      detail,
+	})
+}
+
 // handleTransferPropose — payee validates the proposal and accepts or rejects.
 func (n *Node) handleTransferPropose(env map[string]any) map[string]any {
 	p, ok := payloadOf(env)
 	if !ok {
 		return n.errorReply(env, "malformed", "missing payload")
 	}
+	tid := pStr(p, "transfer_id")
+	if tid == "" {
+		return n.errorReply(env, "malformed", "missing transfer_id")
+	}
 	fromHost := host(envStr(env, "from"))
 	c := n.contactByHost[fromHost]
 	if c == nil || !c.Active || c.Closed {
-		return n.errorReply(env, "unknown-contact", "no active contact")
+		return n.rejectTransfer(env, tid, "unknown-contact", "no active contact")
 	}
 	if c.Diverged {
-		return n.errorReply(env, "frozen", "contact frozen: checkpoint divergence (§8.3)")
+		return n.rejectTransfer(env, tid, "frozen", "contact frozen: checkpoint divergence (§8.3)")
 	}
 	n.releaseIfBusyExpired(c)
 	if c.Busy {
-		return n.errorReply(env, "busy", "contact has an operation in flight")
+		return n.rejectTransfer(env, tid, "busy", "contact has an operation in flight")
 	}
 	opSeq, _ := pInt(p, "op_seq")
 	if opSeq != c.OpSeq {
-		return n.errorReply(env, "stale-pool", fmt.Sprintf("op_seq %d != current %d", opSeq, c.OpSeq))
+		return n.rejectTransfer(env, tid, "stale-pool", fmt.Sprintf("op_seq %d != current %d", opSeq, c.OpSeq))
 	}
-	tid := pStr(p, "transfer_id")
 	toMember := pStr(p, "to_member")
 	tm := n.members[localPart(toMember)]
 	if tm == nil || !tm.Active {
-		return n.errorReply(env, "unknown-member", "to_member not found")
+		return n.rejectTransfer(env, tid, "unknown-member", "to_member not found")
 	}
 	src, ok1 := pInt(p, "src_amount")
 	dst, ok2 := pInt(p, "dst_amount")
 	if !ok1 || !ok2 || src <= 0 {
-		return n.errorReply(env, "malformed", "invalid amounts")
+		return n.rejectTransfer(env, tid, "malformed", "invalid amounts")
 	}
 	wantDst, err := c.priceIncoming(src)
 	if err != nil {
-		return n.errorReply(env, "dust", err.Error())
+		return n.rejectTransfer(env, tid, "dust", err.Error())
 	}
 	if wantDst != dst {
-		return n.errorReply(env, "price-mismatch",
+		return n.rejectTransfer(env, tid, "price-mismatch",
 			fmt.Sprintf("our price %d != proposed %d", wantDst, dst))
 	}
 	// Accept: open the state machine, lock the contact, hold the payout.
@@ -273,6 +287,39 @@ func (n *Node) handleTransferReceipt(env map[string]any) map[string]any {
 	}
 	if c := n.contacts[t.ContactID]; c != nil {
 		c.Busy, c.BusyTransfer = false, ""
+	}
+	return nil
+}
+
+// AbortTransfer lets the payer abort an outgoing transfer before it commits
+// (§7.1): valid only in PROPOSED or ACCEPTED. It releases the contact lock and
+// notifies the peer with transfer.abort.
+func (n *Node) AbortTransfer(transferID string) error {
+	n.mu.Lock()
+	t := n.transfers[transferID]
+	if t == nil || !t.Outgoing {
+		n.mu.Unlock()
+		return fmt.Errorf("no outgoing transfer %s", transferID)
+	}
+	next, err := conformance.Transition(t.State, "abort")
+	if err != nil {
+		n.mu.Unlock()
+		return fmt.Errorf("cannot abort in state %s: %w", t.State, err)
+	}
+	t.State = next
+	var peerBase string
+	var env map[string]any
+	if c := n.contacts[t.ContactID]; c != nil {
+		if c.BusyTransfer == t.ID {
+			c.Busy, c.BusyTransfer = false, ""
+		}
+		peerBase = c.PeerBase
+		env = n.buildSigned("transfer.abort", c.PeerBase, "", map[string]any{"transfer_id": t.ID})
+	}
+	_ = n.persistLocked()
+	n.mu.Unlock()
+	if env != nil {
+		n.dispatch(peerBase, env)
 	}
 	return nil
 }

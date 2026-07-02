@@ -528,6 +528,103 @@ func TestCheckpointDivergence(t *testing.T) {
 	}
 }
 
+// TestTransferAbort asserts the payer can abort a pre-commit transfer and reuse
+// the contact (PROTOCOL §7.1).
+func TestTransferAbort(t *testing.T) {
+	a, b, baseA, baseB := twoNodes(t)
+	if _, err := a.OpenContact(baseB, 500_000_000, ""); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, func() bool { return a.ContactActive(baseB) && b.ContactActive(baseA) })
+
+	a.SetSender(blackhole{}) // proposal never reaches b: stays PROPOSED, busy
+	tid, err := a.StartTransfer(baseB, "alice@"+a.Host(), "bob@"+b.Host(), 10_000_000, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.AbortTransfer(tid); err != nil {
+		t.Fatal(err)
+	}
+	if st := a.TransferState(tid); st != "ABORTED" {
+		t.Errorf("state after abort = %q, want ABORTED", st)
+	}
+	if v, _ := a.ContactByPeer(baseB); v.Busy {
+		t.Error("contact still busy after abort")
+	}
+	if _, err := a.StartTransfer(baseB, "alice@"+a.Host(), "bob@"+b.Host(), 5_000_000, ""); err != nil {
+		t.Errorf("contact not reusable after abort: %v", err)
+	}
+}
+
+// TestMemberManagement adds and deactivates a member at runtime (PROTOCOL §11).
+func TestMemberManagement(t *testing.T) {
+	a, b, baseA, baseB := twoNodes(t)
+	if _, err := a.OpenContact(baseB, 500_000_000, ""); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, func() bool { return a.ContactActive(baseB) && b.ContactActive(baseA) })
+
+	if err := b.AddMember("carol", "Carol", 50_000_000); err != nil {
+		t.Fatal(err)
+	}
+	if !b.MemberActive("carol") {
+		t.Fatal("carol should be active after AddMember")
+	}
+	// A transfer to the new member settles.
+	t1, err := a.StartTransfer(baseB, "alice@"+a.Host(), "carol@"+b.Host(), 10_000_000, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, func() bool { return a.TransferState(t1) == "SETTLED" })
+
+	// Deactivate: transfers to carol are now rejected.
+	if err := b.DeactivateMember("carol"); err != nil {
+		t.Fatal(err)
+	}
+	if b.MemberActive("carol") {
+		t.Fatal("carol should be inactive after DeactivateMember")
+	}
+	t2, err := a.StartTransfer(baseB, "alice@"+a.Host(), "carol@"+b.Host(), 5_000_000, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, func() bool { return a.TransferState(t2) == "REJECTED" })
+}
+
+// TestLogPagination checks fixed-size log pages and head metadata (§9.2).
+func TestLogPagination(t *testing.T) {
+	n, err := lpnode.NewNode(lpnode.Config{
+		Base: "https://p.example", Name: "P", CurrencyName: "P", CurrencySymbol: "P",
+		CPeriodPpm: 274, UDPeriod: "P1D", GenesisUD: 1_000_000,
+		Members: []lpnode.MemberConfig{{Name: "alice", Grant: 1_000_000}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 1 genesis grant + 150 UD ticks = 151 records → 2 pages of 100.
+	for i := 0; i < 150; i++ {
+		if _, err := n.RunUD(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	head := n.LogHead()
+	if head["seq"].(int64) != 151 {
+		t.Fatalf("log seq = %v, want 151", head["seq"])
+	}
+	if head["page_count"].(int64) != 2 {
+		t.Errorf("page_count = %v, want 2", head["page_count"])
+	}
+	if got := len(n.LogPage(0)); got != lpnode.LogPageSize {
+		t.Errorf("page 0 len = %d, want %d", got, lpnode.LogPageSize)
+	}
+	if got := len(n.LogPage(1)); got != 51 {
+		t.Errorf("page 1 len = %d, want 51", got)
+	}
+	if got := len(n.LogPage(2)); got != 0 {
+		t.Errorf("out-of-range page len = %d, want 0", got)
+	}
+}
+
 // TestTransferExpiry asserts a stalled pre-commit transfer expires and releases
 // the contact lock (PROTOCOL §7.1, §7.4).
 func TestTransferExpiry(t *testing.T) {

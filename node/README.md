@@ -60,7 +60,7 @@ go run ./cmd/lpconform http://127.0.0.1:8091 http://127.0.0.1:8092
 | `GET /lp/log/head.json`, `GET /lp/log/` | hash-linked log (§9.2) |
 | `POST /admin/{contact,transfer,ud}` | out-of-protocol driver for demos |
 
-## Known PoC-scope limits (for the next iteration)
+## Implemented behaviours
 
 - Persistence is opt-in: `serve -state <file>` (or `lpnode.Restore` / `SetStore`
   with a `store.Store`) snapshots the full node — ledger, contacts, transfers,
@@ -89,4 +89,22 @@ go run ./cmd/lpconform http://127.0.0.1:8091 http://127.0.0.1:8092
   the peer's `channel_root` contradicts ours at the same `op_seq`, refusing new
   operations until resolved out of band. A mere op_seq lag (a normal in-flight
   transient) is not treated as divergence.
-- Sealed outboxes (§5.1, EXPERIMENTAL) are deliberately deferred per DESIGN §10.
+- Transfer rejection uses `transfer.reject {transfer_id, code, detail}` (§7.2),
+  so a rejected proposal advances the payer to REJECTED and frees the contact;
+  the payer can also `AbortTransfer` a pre-commit transfer (`/admin/abort`).
+- Runtime membership: `AddMember` / `DeactivateMember` (`/admin/member`) —
+  inactive members receive no UD and cannot be transfer targets. Names are never
+  deleted (the log references them).
+- Log pagination (§9.2): fixed-size pages at `/lp/log/page-N.json`, with
+  `page_size`/`page_count` in `/lp/log/head.json`.
+- Transparency-gated log (§9.3): `public`/`pseudonymous` logs are open; a
+  `peers` log requires an `X-LP-Peer` header naming an active contact.
+  Checkpoints are public in every mode. The header check is advisory
+  (unauthenticated GET) — adequate because the security-critical data
+  (checkpoints) is always public; the full log at `peers` level is a privacy
+  nicety, not a trust boundary.
+
+## Genuinely deferred
+
+- Sealed outboxes (§5.1, EXPERIMENTAL) — deferred to field experience per
+  DESIGN §10; the `sealed-outbox` capability is reserved.

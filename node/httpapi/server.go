@@ -8,11 +8,31 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/LaPingvino/liquiditypub/conformance"
 	lpnode "github.com/LaPingvino/liquiditypub/node"
 )
+
+// logVisible enforces the transparency level for log endpoints (§9.3):
+// public/pseudonymous logs are open; a "peers" log requires the requester to
+// name an active-contact peer via the X-LP-Peer header. Checkpoints are never
+// gated. The header check is advisory (unauthenticated GET), which is adequate
+// because the security-critical data — checkpoints — is always public; the full
+// log at "peers" level is a privacy nicety, not a trust boundary.
+func logVisible(n *lpnode.Node, r *http.Request) bool {
+	if n.Transparency() != "peers" {
+		return true
+	}
+	return n.IsActivePeer(r.Header.Get("X-LP-Peer"))
+}
+
+func denyLog(w http.ResponseWriter) {
+	writeJSON(w, http.StatusForbidden, map[string]any{
+		"code": "forbidden", "detail": "log visible to contact peers only (§9.3)",
+	})
+}
 
 // Handler builds the HTTP mux for a node.
 func Handler(n *lpnode.Node) http.Handler {
@@ -33,11 +53,32 @@ func Handler(n *lpnode.Node) http.Handler {
 		writeJSON(w, http.StatusOK, n.OutboxFor(name))
 	})
 
-	// Log head + pages (§9.2).
+	// Log head + fixed-size pages (§9.2), gated by transparency level (§9.3).
 	mux.HandleFunc("/lp/log/head.json", func(w http.ResponseWriter, r *http.Request) {
+		if !logVisible(n, r) {
+			denyLog(w)
+			return
+		}
 		writeJSON(w, http.StatusOK, n.LogHead())
 	})
 	mux.HandleFunc("/lp/log/", func(w http.ResponseWriter, r *http.Request) {
+		if !logVisible(n, r) {
+			denyLog(w)
+			return
+		}
+		// /lp/log/page-N.json serves one page; /lp/log/ (or any other path under
+		// it) serves the whole log for convenience.
+		name := strings.TrimPrefix(r.URL.Path, "/lp/log/")
+		if strings.HasPrefix(name, "page-") {
+			numStr := strings.TrimSuffix(strings.TrimPrefix(name, "page-"), ".json")
+			page, err := strconv.Atoi(numStr)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"code": "malformed", "detail": "bad page number"})
+				return
+			}
+			writeJSON(w, http.StatusOK, n.LogPage(page))
+			return
+		}
 		writeJSON(w, http.StatusOK, n.LogRecords())
 	})
 
@@ -139,6 +180,45 @@ func Handler(n *lpnode.Node) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ud_base": udBase})
+	})
+
+	mux.HandleFunc("/admin/abort", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Transfer string `json:"transfer"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		if err := n.AbortTransfer(req.Transfer); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"status": "aborted"})
+	})
+
+	mux.HandleFunc("/admin/member", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Name        string `json:"name"`
+			DisplayName string `json:"display_name"`
+			Grant       int64  `json:"grant"`
+			Deactivate  bool   `json:"deactivate"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		var err error
+		if req.Deactivate {
+			err = n.DeactivateMember(req.Name)
+		} else {
+			err = n.AddMember(req.Name, req.DisplayName, req.Grant)
+		}
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"member": req.Name, "active": !req.Deactivate})
 	})
 
 	return mux
