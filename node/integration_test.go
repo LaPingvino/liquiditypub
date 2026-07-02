@@ -418,6 +418,38 @@ func TestReserveAdjust(t *testing.T) {
 	}
 }
 
+// TestOutboxPruning asserts a node prunes outbox entries the peer has
+// acknowledged via its checkpoint last_seq_processed (PROTOCOL §5.1).
+func TestOutboxPruning(t *testing.T) {
+	a, b, baseA, baseB := twoNodes(t)
+	if _, err := a.OpenContact(baseB, 500_000_000, ""); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, func() bool { return a.ContactActive(baseB) && b.ContactActive(baseA) })
+	tid, err := a.StartTransfer(baseB, "alice@"+a.Host(), "bob@"+b.Host(), 10_000_000, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, func() bool { return b.TransferState(tid) == "SETTLED" })
+
+	// A sent contact.propose, transfer.propose, transfer.commit — all processed
+	// by b, so its checkpoint acknowledges them.
+	if got := len(a.OutboxFor(b.Host())); got == 0 {
+		t.Fatal("expected non-empty outbox before pruning")
+	}
+	res, err := a.ReconcilePeer(baseB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Pruned == 0 {
+		t.Errorf("expected pruning, got %+v", res)
+	}
+	// Everything a sent to b was acknowledged, so the outbox is now empty.
+	if got := len(a.OutboxFor(b.Host())); got != 0 {
+		t.Errorf("outbox after pruning = %d entries, want 0", got)
+	}
+}
+
 // cpSender wraps a bus but can serve a tampered checkpoint for one peer, to
 // exercise divergence detection deterministically.
 type cpSender struct {

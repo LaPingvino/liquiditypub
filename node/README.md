@@ -69,8 +69,8 @@ go run ./cmd/lpconform http://127.0.0.1:8091 http://127.0.0.1:8092
   `store.Store` interface is the seam the D1 (`joop-n7j`) and GAE (`joop-3mu`)
   profiles back with their own KV/blob. Default (no `-state`) is in-memory.
 - Both transports work: push (§5.2) and the pull baseline (§5.1, `serve -pull
-  <cadence>`, `Node.PollPeer`/`StartPulling`). Outbox pruning against a peer's
-  published `last_seq_processed` is not implemented yet (an optimization).
+  <cadence>`, `Node.PollPeer`/`StartPulling`), including outbox pruning against
+  a peer's published `last_seq_processed` (done during reconciliation).
 - Auto-accept of contacts and genesis member grants are demo conveniences, not
   protocol requirements (both are node-internal policy under the membrane).
 - `reserve.adjust` (§8.4) is implemented: consensual liquidity top-ups /
