@@ -63,8 +63,9 @@ go run ./cmd/lpconform http://127.0.0.1:8091 http://127.0.0.1:8092
 ## Known PoC-scope limits (for the next iteration)
 
 - In-memory only: no crash recovery / log replay on restart yet.
-- Transfers are pull-baseline-published but driven over push; a polling pull
-  loop is a straightforward addition to `fed/`.
+- Both transports work: push (§5.2) and the pull baseline (§5.1, `serve -pull
+  <cadence>`, `Node.PollPeer`/`StartPulling`). Outbox pruning against a peer's
+  published `last_seq_processed` is not implemented yet (an optimization).
 - Auto-accept of contacts and genesis member grants are demo conveniences, not
   protocol requirements (both are node-internal policy under the membrane).
 - No `key.announce` rotation, `reserve.adjust`, or sealed outboxes yet — all are

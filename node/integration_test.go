@@ -37,6 +37,13 @@ func (b *bus) FetchIdentity(peerBase string) (map[string]any, error) {
 	return b.byBase[peerBase].IdentityDoc(), nil
 }
 
+func (b *bus) FetchOutbox(peerBase, myHost string) ([]map[string]any, error) {
+	if n := b.byBase[peerBase]; n != nil {
+		return n.OutboxFor(myHost), nil
+	}
+	return nil, nil
+}
+
 func twoNodes(t *testing.T) (a, b *lpnode.Node, baseA, baseB string) {
 	t.Helper()
 	baseA, baseB = "https://riverside.example", "https://hilltop.example"
@@ -243,7 +250,85 @@ func TestContactSerialization(t *testing.T) {
 
 type blackhole struct{}
 
-func (blackhole) Deliver(string, map[string]any) error         { return nil }
-func (blackhole) FetchIdentity(string) (map[string]any, error) { return map[string]any{}, nil }
+func (blackhole) Deliver(string, map[string]any) error                 { return nil }
+func (blackhole) FetchIdentity(string) (map[string]any, error)         { return map[string]any{}, nil }
+func (blackhole) FetchOutbox(string, string) ([]map[string]any, error) { return nil, nil }
+
+// pullBus federates by pull only: Deliver is a no-op (no push), so the entire
+// round trip is driven by fetching outboxes (§5.1).
+type pullBus struct{ byBase map[string]*lpnode.Node }
+
+func (pullBus) Deliver(string, map[string]any) error { return nil }
+func (p pullBus) FetchIdentity(peerBase string) (map[string]any, error) {
+	return p.byBase[peerBase].IdentityDoc(), nil
+}
+func (p pullBus) FetchOutbox(peerBase, myHost string) ([]map[string]any, error) {
+	if n := p.byBase[peerBase]; n != nil {
+		return n.OutboxFor(myHost), nil
+	}
+	return nil, nil
+}
+
+// TestPullOnlyFederation drives a full contact-open + transfer entirely over the
+// pull baseline, with push disabled — proving §5.1 works standalone.
+func TestPullOnlyFederation(t *testing.T) {
+	baseA, baseB := "https://a.example", "https://b.example"
+	mk := func(base, cur, member string) *lpnode.Node {
+		n, err := lpnode.NewNode(lpnode.Config{
+			Base: base, Name: cur, CurrencyName: cur, CurrencySymbol: cur[:1],
+			CPeriodPpm: 274, UDPeriod: "P1D", GenesisUD: 1_000_000, AutoAcceptSeed: 500_000_000,
+			Members: []lpnode.MemberConfig{{Name: member, Grant: 100_000_000}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	a, b := mk(baseA, "Aaa", "alice"), mk(baseB, "Bbb", "bob")
+	pb := pullBus{byBase: map[string]*lpnode.Node{baseA: a, baseB: b}}
+	a.SetSender(pb)
+	b.SetSender(pb)
+	a.Start()
+	b.Start()
+
+	// Both poll each other every tick; a bounded loop stands in for tickers.
+	pump := func() {
+		for i := 0; i < 60; i++ {
+			b.PollPeer(baseA)
+			a.PollPeer(baseB)
+			time.Sleep(time.Millisecond)
+		}
+	}
+
+	if _, err := a.OpenContact(baseB, 500_000_000, "pull only"); err != nil {
+		t.Fatal(err)
+	}
+	pump()
+	if !a.ContactActive(baseB) || !b.ContactActive(baseA) {
+		t.Fatal("contact never activated over pull")
+	}
+
+	tid, err := a.StartTransfer(baseB, "alice@a.example", "bob@b.example", 10_000_000, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pump()
+	if a.TransferState(tid) != "SETTLED" || b.TransferState(tid) != "SETTLED" {
+		t.Fatalf("transfer not settled over pull: A=%s B=%s",
+			a.TransferState(tid), b.TransferState(tid))
+	}
+	va, _ := a.ContactByPeer(baseB)
+	vb, _ := b.ContactByPeer(baseA)
+	if va.ChannelRoot != vb.ChannelRoot || va.OpSeq != vb.OpSeq {
+		t.Errorf("reconciliation mismatch over pull: A(%d,%s) B(%d,%s)",
+			va.OpSeq, va.ChannelRoot, vb.OpSeq, vb.ChannelRoot)
+	}
+	if err := a.Ledger().VerifyChain(); err != nil {
+		t.Error(err)
+	}
+	if err := b.Ledger().VerifyChain(); err != nil {
+		t.Error(err)
+	}
+}
 
 var _ = hostOf

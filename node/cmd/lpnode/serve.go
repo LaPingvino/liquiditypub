@@ -26,6 +26,7 @@ func runServe(args []string) error {
 	seed := fs.Int64("seed", 500_000_000, "auto-accept seed (our currency)")
 	peer := fs.String("peer", "", "on startup, open a contact to this peer base URL")
 	udTick := fs.Bool("ud", false, "issue one UD period on startup")
+	pull := fs.Duration("pull", 0, "if >0, poll peer outboxes at this cadence (pull baseline, §5.1)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -63,6 +64,10 @@ func runServe(args []string) error {
 		if _, err := n.RunUD(); err != nil {
 			return err
 		}
+	}
+	if *pull > 0 {
+		n.StartPulling(*pull, make(chan struct{}))
+		fmt.Printf("  pull: polling peer outboxes every %s\n", *pull)
 	}
 	if *peer != "" {
 		go func() {

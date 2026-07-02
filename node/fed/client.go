@@ -41,6 +41,44 @@ func (s *HTTPSender) Deliver(peerBase string, env map[string]any) error {
 	return nil
 }
 
+// FetchOutbox retrieves the envelopes a peer has addressed to myHost, in seq
+// order (§5.1). A missing or empty outbox is not an error.
+func (s *HTTPSender) FetchOutbox(peerBase, myHost string) ([]map[string]any, error) {
+	resp, err := s.Client.Get(peerBase + "/lp/outbox/" + myHost + ".json")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("outbox %s: HTTP %d", peerBase, resp.StatusCode)
+	}
+	buf := new(bytes.Buffer)
+	if _, err := buf.ReadFrom(resp.Body); err != nil {
+		return nil, err
+	}
+	if buf.Len() == 0 {
+		return nil, nil
+	}
+	v, err := conformance.DecodeJSON(buf.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	arr, ok := v.([]any)
+	if !ok {
+		return nil, fmt.Errorf("outbox %s: not a JSON array", peerBase)
+	}
+	out := make([]map[string]any, 0, len(arr))
+	for _, e := range arr {
+		if m, ok := e.(map[string]any); ok {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+
 // FetchIdentity retrieves a peer's identity document, decoded with exact
 // integers (§3).
 func (s *HTTPSender) FetchIdentity(peerBase string) (map[string]any, error) {

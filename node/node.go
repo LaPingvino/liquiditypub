@@ -33,6 +33,9 @@ type Sender interface {
 	Deliver(peerBase string, envelope map[string]any) error
 	// FetchIdentity retrieves and returns a peer's identity document (§3).
 	FetchIdentity(peerBase string) (map[string]any, error)
+	// FetchOutbox retrieves the envelopes a peer has addressed to myHost,
+	// ordered by seq (§5.1, the mandatory pull baseline).
+	FetchOutbox(peerBase, myHost string) ([]map[string]any, error)
 }
 
 // Node is a running LiquidityPub node. All mutating protocol logic runs under
