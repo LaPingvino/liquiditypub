@@ -56,8 +56,9 @@ func (n *Node) StartTransfer(peerBase, fromMember, toMember string, src int64, n
 	}
 	n.releaseIfBusyExpired(c)
 	if c.Busy {
+		busy := c.BusyTransfer // read under the lock (the race detector caught a read after Unlock)
 		n.mu.Unlock()
-		return "", fmt.Errorf("contact busy (§6.3): op %s in flight", c.BusyTransfer)
+		return "", fmt.Errorf("contact busy (§6.3): op %s in flight", busy)
 	}
 	if src <= 0 {
 		n.mu.Unlock()
@@ -321,8 +322,9 @@ func (n *Node) AbortTransfer(transferID string) error {
 	}
 	next, err := conformance.Transition(t.State, "abort")
 	if err != nil {
+		state := t.State
 		n.mu.Unlock()
-		return fmt.Errorf("cannot abort in state %s: %w", t.State, err)
+		return fmt.Errorf("cannot abort in state %s: %w", state, err)
 	}
 	t.State = next
 	var peerBase string

@@ -30,16 +30,18 @@ func (n *Node) AdjustReserve(peerBase string, delta int64, memo string) (string,
 	}
 	n.releaseIfBusyExpired(c)
 	if c.Busy {
+		busy := c.BusyTransfer // read under the lock (the race detector caught a read after Unlock)
 		n.mu.Unlock()
-		return "", fmt.Errorf("contact busy (§6.3): op %s in flight", c.BusyTransfer)
+		return "", fmt.Errorf("contact busy (§6.3): op %s in flight", busy)
 	}
 	if delta == 0 {
 		n.mu.Unlock()
 		return "", fmt.Errorf("delta must be non-zero")
 	}
 	if c.MyReserveOfPeer+delta < 0 {
+		have := c.MyReserveOfPeer
 		n.mu.Unlock()
-		return "", fmt.Errorf("withdrawal exceeds reserve: %d + %d < 0", c.MyReserveOfPeer, delta)
+		return "", fmt.Errorf("withdrawal exceeds reserve: %d + %d < 0", have, delta)
 	}
 	adjustID := newID()
 	c.Busy, c.BusyTransfer = true, adjustID
