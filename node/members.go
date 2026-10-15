@@ -66,3 +66,28 @@ func (n *Node) MemberActive(name string) bool {
 	m := n.members[name]
 	return m != nil && m.Active
 }
+
+// Reactivate brings a member who left back: the same account, the dividend
+// again from the next period, its balance as it was. Members are never
+// deleted, so this is how someone rejoins.
+func (n *Node) Reactivate(name string) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	m := n.members[name]
+	if m == nil {
+		return fmt.Errorf("no member %q", name)
+	}
+	if m.Active {
+		return fmt.Errorf("member %q is already active", name)
+	}
+	m.Active = true
+	n.currentUD = n.computeUDBase()
+	return n.persistLocked()
+}
+
+// MemberKnown reports whether a member exists, active or not.
+func (n *Node) MemberKnown(name string) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.members[name] != nil
+}

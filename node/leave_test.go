@@ -91,3 +91,33 @@ func TestRedistributeRemainder(t *testing.T) {
 		t.Fatalf("remainder %d", n.Balance(FundRedistribute))
 	}
 }
+
+// Rejoining: the same member, dividend again, balance as it was.
+func TestReactivate(t *testing.T) {
+	n := leaveNode(t)
+	if err := n.Leave("bea", LeaveKeep, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := n.RunUD(); err != nil {
+		t.Fatal(err)
+	}
+	kept := bal(n, "bea")
+	if kept != 1_000_000 {
+		t.Fatalf("a member who left got a dividend: %d", kept)
+	}
+	if err := n.Reactivate("bea"); err != nil || !n.MemberActive("bea") {
+		t.Fatalf("reactivate: %v", err)
+	}
+	if err := n.Reactivate("bea"); err == nil {
+		t.Fatal("reactivated an active member")
+	}
+	if err := n.Reactivate("nobody"); err == nil || n.MemberKnown("nobody") {
+		t.Fatal("reactivated someone who never was a member")
+	}
+	if _, err := n.RunUD(); err != nil {
+		t.Fatal(err)
+	}
+	if bal(n, "bea") <= kept {
+		t.Fatal("no dividend after rejoining")
+	}
+}
