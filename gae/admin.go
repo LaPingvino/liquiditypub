@@ -127,7 +127,7 @@ func adminAPI(h *Host, db *datastore.Client, token string) http.Handler {
 		m := r.FormValue("member")
 		cp := n.Checkpoint()
 		return map[string]any{"member": m, "active": n.MemberActive(m), "balance": n.Balance(ledger.MemberPrefix + m),
-			"current_ud": cp["current_ud"], "members": cp["member_count"], "money_supply": cp["money_supply"]}, nil
+			"current_ud": cp["current_ud"], "members": n.ActiveMembers(), "money_supply": cp["money_supply"]}, nil
 	}))
 	// POST {gid, from, to, amount}: a payment inside a group.
 	mux.HandleFunc("POST /lp/admin/pay", auth(func(w http.ResponseWriter, r *http.Request) (any, error) {

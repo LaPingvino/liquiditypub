@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	cloud.google.com/go/datastore v1.27.0
 	github.com/LaPingvino/liquiditypub/conformance v0.2.0
-	github.com/LaPingvino/liquiditypub/node v0.2.4
+	github.com/LaPingvino/liquiditypub/node v0.2.5
 )
 
 require (
