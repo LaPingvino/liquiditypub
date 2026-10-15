@@ -8,6 +8,7 @@ import (
 
 	"cloud.google.com/go/datastore"
 	lpnode "github.com/LaPingvino/liquiditypub/node"
+	"github.com/LaPingvino/liquiditypub/node/ledger"
 )
 
 // Runs only against the Datastore emulator:
@@ -51,7 +52,10 @@ func TestDSStoreRoundTrip(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	want, head, bal := n.Ledger().Len(), n.Ledger().Head(), n.Balance("member:m7")
+	want, head, bal := n.Ledger().Len(), n.Ledger().Head(), n.Balance(ledger.MemberPrefix+"m7")
+	if bal <= 0 {
+		t.Fatalf("m7 has %d after 20 dividends: the balance check would prove nothing", bal)
+	}
 	if want < putBatch {
 		t.Fatalf("only %d records: the test should cross a put batch", want)
 	}
@@ -60,8 +64,8 @@ func TestDSStoreRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if back.Ledger().Len() != want || back.Ledger().Head() != head || back.Balance("member:m7") != bal || !back.MemberActive("m29") {
-		t.Fatalf("restored: %d records head %s balance %d; want %d %s %d", back.Ledger().Len(), back.Ledger().Head(), back.Balance("member:m7"), want, head, bal)
+	if back.Ledger().Len() != want || back.Ledger().Head() != head || back.Balance(ledger.MemberPrefix+"m7") != bal || !back.MemberActive("m29") {
+		t.Fatalf("restored: %d records head %s balance %d; want %d %s %d", back.Ledger().Len(), back.Ledger().Head(), back.Balance(ledger.MemberPrefix+"m7"), want, head, bal)
 	}
 	if err := back.Ledger().VerifyChain(); err != nil {
 		t.Fatalf("restored chain: %v", err)
