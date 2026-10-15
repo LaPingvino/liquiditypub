@@ -59,6 +59,12 @@ type Config struct {
 	// loopback bind.
 	AdminToken string
 
+	// BatchUD writes each dividend run as one issuance.ud transaction with an
+	// entry per active member, instead of one per member: the log then grows by
+	// one record per period whatever the membership (an hourly dividend stays
+	// cheap). Node policy; the published amounts are the same.
+	BatchUD bool
+
 	// PrivKey is the node signing key. If nil, NewNode generates one.
 	PrivKey ed25519.PrivateKey
 }

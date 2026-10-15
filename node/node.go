@@ -238,7 +238,31 @@ func (n *Node) RunUD() (int64, error) {
 		return 0, nil
 	}
 	now := n.clock().Format(time.RFC3339)
+	if n.cfg.BatchUD {
+		var entries []ledger.Entry
+		var total int64
+		for _, name := range n.sortedMemberNames() {
+			m := n.members[name]
+			if !m.Active {
+				continue
+			}
+			if amt := conformance.RecipientUD(udBase, m.Weight); amt > 0 {
+				entries = append(entries, ledger.Entry{Account: ledger.MemberPrefix + name, Amount: amt})
+				total += amt
+			}
+		}
+		if total > 0 {
+			entries = append(entries, ledger.Entry{Account: ledger.AcctIssuance, Amount: -total})
+			if _, err := n.led.Append(ledger.Tx{ID: newID(), Type: ledger.TxIssuanceUD, Created: now, Entries: entries}); err != nil {
+				n.mu.Unlock()
+				return 0, err
+			}
+		}
+	}
 	for _, name := range n.sortedMemberNames() {
+		if n.cfg.BatchUD {
+			break
+		}
 		m := n.members[name]
 		if !m.Active {
 			continue

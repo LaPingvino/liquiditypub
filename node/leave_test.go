@@ -148,3 +148,35 @@ func TestSetIdentity(t *testing.T) {
 		t.Fatal("a rename moved money")
 	}
 }
+
+// BatchUD: one record per dividend run, the same amounts as one per member.
+func TestBatchUD(t *testing.T) {
+	per, batch := leaveNode(t), leaveNode(t)
+	batch.cfg.BatchUD = true
+	r0p, r0b := per.Ledger().Len(), batch.Ledger().Len()
+	for i := 0; i < 3; i++ {
+		if _, err := per.RunUD(); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := batch.RunUD(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := batch.Ledger().Len() - r0b; got != 3 {
+		t.Fatalf("batched: %d records for 3 runs, want 3", got)
+	}
+	if got := per.Ledger().Len() - r0p; got != 12 {
+		t.Fatalf("per member: %d records, want 12 (4 members x 3)", got)
+	}
+	for _, m := range []string{"ana", "bea", "cai", "dan"} {
+		if bal(per, m) != bal(batch, m) {
+			t.Fatalf("%s: %d per member, %d batched", m, bal(per, m), bal(batch, m))
+		}
+	}
+	if per.Ledger().MoneySupply() != batch.Ledger().MoneySupply() {
+		t.Fatal("supplies differ")
+	}
+	if err := batch.Ledger().VerifyChain(); err != nil {
+		t.Fatal(err)
+	}
+}
