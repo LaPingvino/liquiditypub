@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -42,6 +43,17 @@ func (h *Host) Group(gid string) *lpnode.Node {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return h.nodes[gid+"."+h.groupDomain]
+}
+
+// Groups lists the open groups' ids.
+func (h *Host) Groups() []string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	out := make([]string, 0, len(h.nodes))
+	for hst := range h.nodes {
+		out = append(out, strings.TrimSuffix(hst, "."+h.groupDomain))
+	}
+	return out
 }
 
 // Open starts group gid (named name), restoring it from its store if it

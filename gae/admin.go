@@ -8,10 +8,12 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"cloud.google.com/go/datastore"
+	"github.com/LaPingvino/liquiditypub/conformance"
 	lpnode "github.com/LaPingvino/liquiditypub/node"
 	"github.com/LaPingvino/liquiditypub/node/httpapi"
 	"github.com/LaPingvino/liquiditypub/node/ledger"
@@ -191,7 +193,55 @@ func adminAPI(h *Host, db *datastore.Client, token string) http.Handler {
 		}
 		return map[string]string{"state": n.TransferState(r.FormValue("id"))}, nil
 	}))
+	// GET ?gid=: the groups gid is linked with (an active pool), with names.
+	mux.HandleFunc("GET /lp/admin/links", auth(func(w http.ResponseWriter, r *http.Request) (any, error) {
+		gid := r.FormValue("gid")
+		n, err := group(gid)
+		if err != nil {
+			return nil, err
+		}
+		out := []map[string]string{}
+		for _, other := range h.Groups() {
+			if other != gid && n.ContactActive(h.Base(other)) {
+				out = append(out, map[string]string{"gid": other, "name": nodeName(h.Group(other))})
+			}
+		}
+		return out, nil
+	}))
+	// GET ?from_gid=&to_gid=&amount=: what the payee would get for amount,
+	// priced by the pool between the two groups right now (PROTOCOL §6.2).
+	mux.HandleFunc("GET /lp/admin/quote", auth(func(w http.ResponseWriter, r *http.Request) (any, error) {
+		a, err := group(r.FormValue("from_gid"))
+		if err != nil {
+			return nil, err
+		}
+		cv, ok := a.ContactByPeer(h.Base(r.FormValue("to_gid")))
+		if !ok || !cv.Active {
+			return nil, fmt.Errorf("these groups aren't linked")
+		}
+		amount, err := strconv.ParseInt(r.FormValue("amount"), 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		dst, err := conformance.PoolPrice(cv.MyReserveOfPeer, cv.PeerReserveOfMe, amount)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]int64{"amount": amount, "dst": dst}, nil
+	}))
 	return mux
+}
+
+func nodeName(n *lpnode.Node) string {
+	if n == nil {
+		return ""
+	}
+	if nd, ok := n.IdentityDoc()["node"].(map[string]any); ok {
+		if s, ok := nd["name"].(string); ok {
+			return s
+		}
+	}
+	return ""
 }
 
 // groupReads serves a group's public documents at /lp/g/<gid>/… (identity,

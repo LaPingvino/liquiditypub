@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/LaPingvino/liquiditypub/node/ledger"
 	"github.com/LaPingvino/liquiditypub/node/store"
 )
 
@@ -69,10 +70,32 @@ func TestAdminAPI(t *testing.T) {
 	}
 	ok("POST", "/lp/admin/link", `{"a":"barreiro","b":"arnhem"}`)
 	waitFor(t, "the link", func() bool { return h.Group("barreiro").ContactActive(h.Base("arnhem")) })
+	req, _ := http.NewRequest("GET", srv.URL+"/lp/admin/links?gid=barreiro", nil)
+	req.Header.Set("Authorization", "Bearer tok")
+	lres, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var links []map[string]string
+	json.NewDecoder(lres.Body).Decode(&links)
+	if len(links) != 1 || links[0]["gid"] != "arnhem" || links[0]["name"] != "Arnhem" {
+		t.Fatalf("links: %v", links)
+	}
+	q := ok("GET", "/lp/admin/quote?from_gid=barreiro&to_gid=arnhem&amount=100000", "")
+	if q["dst"].(float64) <= 0 || q["dst"].(float64) > 100000 {
+		t.Fatalf("quote at UD parity, a small amount: %v", q)
+	}
+	if code, _ := call("GET", "/lp/admin/quote?from_gid=barreiro&to_gid=nowhere&amount=1", "", "tok"); code != 400 {
+		t.Fatal("a quote between unlinked groups")
+	}
+	before := h.Group("arnhem").Balance(ledger.MemberPrefix + "u2222222222222222")
 	tr := ok("POST", "/lp/admin/transfer", `{"from_gid":"barreiro","from":"u0a1b2c3d4e5f6071","to_gid":"arnhem","to":"u2222222222222222","amount":100000}`)
 	waitFor(t, "settled", func() bool {
 		return ok("GET", "/lp/admin/transfer?gid=barreiro&id="+tr["id"].(string), "")["state"] == "SETTLED"
 	})
+	if got := h.Group("arnhem").Balance(ledger.MemberPrefix+"u2222222222222222") - before; float64(got) != q["dst"].(float64) {
+		t.Fatalf("the payee got %d, the quote said %v", got, q["dst"])
+	}
 	res, err := http.Get(srv.URL + "/lp/g/arnhem/.well-known/liquiditypub")
 	if err != nil || res.StatusCode != 200 {
 		t.Fatalf("group identity: %v %v", res.StatusCode, err)
