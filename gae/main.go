@@ -46,17 +46,21 @@ func main() {
 		Description:    env("LP_DESC", "CoffeeBucks (K$): Kafumu's local currency, a Universal Dividend for every member"),
 		CurrencyName:   env("LP_CURRENCY", "CoffeeBucks"),
 		CurrencySymbol: env("LP_SYMBOL", "K$"),
-		CPeriodPpm:     274, // ≈ 10 %/year, daily (PROTOCOL §3)
-		UDPeriod:       "P1D",
-		GenesisUD:      1_000_000,
-		Transparency:   "pseudonymous",
+		// Hourly, so a new member has something within the hour (Joop); one
+		// batched record per run keeps the log small. 11 ppm/hour ≈ 10.1 %/year
+		// (integer ppm can't do 274/24 exactly); the floor is a day's 1 K$ / 24.
+		CPeriodPpm:   11,
+		UDPeriod:     "PT1H",
+		GenesisUD:    1_000_000 / 24,
+		BatchUD:      true,
+		Transparency: "pseudonymous",
 	}
 	// Kafumu's groups (VISION §4): each its own K$ node on this host.
 	groupCfg := func(gid, name string) lpnode.Config {
 		c := cfg
 		c.Name, c.Description = name, name+": a CoffeeBucks group on Kafumu"
 		c.CurrencyName = "CoffeeBucks " + name
-		c.AutoAcceptSeed = 100 * cfg.GenesisUD // a link is seeded with a hundred dividends a side: UD parity
+		c.AutoAcceptSeed = 100 * 1_000_000 // a link is seeded with a hundred days of dividend a side (100 K$): UD parity
 		return c
 	}
 	ctx := context.Background()
@@ -101,7 +105,7 @@ func main() {
 	addr := ":" + env("PORT", "8080")
 	log.Printf("%s (%s) serving at %s, base %s", cfg.Name, cfg.CurrencySymbol, addr, base)
 	mux := http.NewServeMux()
-	// The daily dividend (PROTOCOL §10: issuance is driven by a scheduler,
+	// The hourly dividend (PROTOCOL §10: issuance is driven by a scheduler,
 	// never by request handling), for the node and every group: App Engine
 	// cron calls this; the header is set only by cron (App Engine strips it
 	// from outside requests).
