@@ -18,8 +18,8 @@ import (
 // node to the other (inproc): the full signed protocol, no HTTP. Contacts are
 // keyed by the peer's host, so every group gets one: <gid>.<groupDomain>.
 type Host struct {
-	groupDomain string                          // e.g. "g.kafumu.com"
-	newStore    func(id string) store.Store     // where a group's state lives
+	groupDomain string                      // e.g. "g.kafumu.com"
+	newStore    func(id string) store.Store // where a group's state lives
 	cfg         func(gid, name string) lpnode.Config
 
 	mu    sync.RWMutex

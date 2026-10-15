@@ -27,6 +27,7 @@ import (
 	lpnode "github.com/LaPingvino/liquiditypub/node"
 	"github.com/LaPingvino/liquiditypub/node/fed"
 	"github.com/LaPingvino/liquiditypub/node/httpapi"
+	"github.com/LaPingvino/liquiditypub/node/store"
 )
 
 func env(k, def string) string {
@@ -50,21 +51,31 @@ func main() {
 		GenesisUD:      1_000_000,
 		Transparency:   "pseudonymous",
 	}
+	// Kafumu's groups (VISION §4): each its own K$ node on this host.
+	groupCfg := func(gid, name string) lpnode.Config {
+		c := cfg
+		c.Name, c.Description = name, name+": a CoffeeBucks group on Kafumu"
+		c.CurrencyName = "CoffeeBucks " + name
+		c.AutoAcceptSeed = 100 * cfg.GenesisUD // a link is seeded with a hundred dividends a side: UD parity
+		return c
+	}
+	ctx := context.Background()
+	var db *datastore.Client
 	var n *lpnode.Node
+	var h *Host
 	var err error
 	if project := env("GOOGLE_CLOUD_PROJECT", env("DATASTORE_PROJECT_ID", "")); project != "" {
-		// On App Engine (or against the emulator): the node lives in Datastore,
-		// its admin token too; a second writer makes this process exit and
-		// restart from what's stored rather than fork the ledger.
-		ctx := context.Background()
-		db, derr := datastore.NewClient(ctx, project)
-		if derr != nil {
-			log.Fatal(derr)
+		// On App Engine (or against the emulator): every node lives in
+		// Datastore, the admin token too; a second writer makes this process
+		// exit and restart from what's stored rather than fork a ledger.
+		if db, err = datastore.NewClient(ctx, project); err != nil {
+			log.Fatal(err)
 		}
 		if cfg.AdminToken, err = adminToken(ctx, db, nodeID); err != nil {
 			log.Fatal(err)
 		}
 		n, err = lpnode.Restore(cfg, exitOnConflict{NewDSStore(db, nodeID)})
+		h = NewHost(env("LP_GROUP_DOMAIN", "g.kafumu.com"), func(id string) store.Store { return exitOnConflict{NewDSStore(db, id)} }, groupCfg)
 	} else {
 		// Local, no Datastore: in memory, and the admin API closed (a random
 		// token nobody knows).
@@ -72,6 +83,7 @@ func main() {
 		rand.Read(tok)
 		cfg.AdminToken = hex.EncodeToString(tok)
 		n, err = lpnode.NewNode(cfg)
+		h = NewHost(env("LP_GROUP_DOMAIN", "g.kafumu.com"), func(string) store.Store { return store.Nop{} }, groupCfg)
 	}
 	if err != nil {
 		log.Fatal(err)
@@ -80,13 +92,19 @@ func main() {
 	n.Start()
 	n.StartExpirySweeper(30*time.Second, make(chan struct{}))
 	n.StartKeyRefresher(5*time.Minute, make(chan struct{}))
+	if db != nil {
+		if err := openGroups(ctx, db, h); err != nil {
+			log.Fatal(err)
+		}
+	}
 
 	addr := ":" + env("PORT", "8080")
 	log.Printf("%s (%s) serving at %s, base %s", cfg.Name, cfg.CurrencySymbol, addr, base)
 	mux := http.NewServeMux()
 	// The daily dividend (PROTOCOL §10: issuance is driven by a scheduler,
-	// never by request handling): App Engine cron calls this; the header is
-	// set only by cron (App Engine strips it from outside requests).
+	// never by request handling), for the node and every group: App Engine
+	// cron calls this; the header is set only by cron (App Engine strips it
+	// from outside requests).
 	mux.HandleFunc("/cron/ud", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Appengine-Cron") != "true" {
 			http.NotFound(w, r)
@@ -98,9 +116,17 @@ func main() {
 			http.Error(w, "ud failed", http.StatusInternalServerError)
 			return
 		}
-		log.Printf("ud: issued %d micro-units", issued)
+		groups, err := h.RunUD()
+		if err != nil {
+			log.Printf("ud: groups: %v", err)
+			http.Error(w, "ud failed", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("ud: issued %d micro-units; %d groups", issued, groups)
 		w.Write([]byte("ok\n"))
 	})
+	mux.Handle("/lp/admin/", adminAPI(h, db, cfg.AdminToken))
+	mux.Handle("/lp/g/", groupReads(h))
 	mux.Handle("/", httpapi.Handler(n))
 	log.Fatal(http.ListenAndServe(addr, mux))
 }
