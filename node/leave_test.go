@@ -130,3 +130,21 @@ func TestReactivate(t *testing.T) {
 		t.Fatal("no dividend after rejoining")
 	}
 }
+
+func TestSetIdentity(t *testing.T) {
+	n := leaveNode(t)
+	supply := n.Ledger().MoneySupply()
+	n.SetIdentity("Kaffeeklatsch", "Bohnen", "☕B")
+	doc := n.IdentityDoc()
+	cur := doc["currency"].(map[string]any)
+	if doc["node"].(map[string]any)["name"] != "Kaffeeklatsch" || cur["name"] != "Bohnen" || cur["symbol"] != "☕B" {
+		t.Fatalf("identity: %v %v", doc["node"], cur)
+	}
+	n.SetIdentity("", "", "BB")
+	if c := n.IdentityDoc()["currency"].(map[string]any); c["name"] != "Bohnen" || c["symbol"] != "BB" {
+		t.Fatalf("empty kept? %v", c)
+	}
+	if n.Ledger().MoneySupply() != supply {
+		t.Fatal("a rename moved money")
+	}
+}

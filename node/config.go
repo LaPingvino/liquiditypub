@@ -151,3 +151,20 @@ func mustParseKey(pub string) (ed25519.PublicKey, error) {
 	}
 	return ed25519.PublicKey(raw), nil
 }
+
+// SetIdentity renames the node, its currency and its symbol (node policy: a
+// community may rename itself; the identity document says so from now on;
+// the ledger's amounts are unchanged). Empty arguments keep what's there.
+func (n *Node) SetIdentity(name, currency, symbol string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if name != "" {
+		n.cfg.Name = name
+	}
+	if currency != "" {
+		n.cfg.CurrencyName = currency
+	}
+	if symbol != "" {
+		n.cfg.CurrencySymbol = symbol
+	}
+}
