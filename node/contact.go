@@ -300,3 +300,31 @@ func (n *Node) seedLedger(peerHost string, amount int64) error {
 	})
 	return err
 }
+
+// RetireReserve returns to issuance the reserve we hold for a peer on a
+// closed contact — for a peer that is gone for good (a deleted group): our
+// own currency, which that peer can now never spend. Only on a closed
+// contact; the supply shrinks by it. Returns the amount retired.
+func (n *Node) RetireReserve(peerBase string) (int64, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	c := n.contactByHost[host(peerBase)]
+	if c == nil {
+		return 0, fmt.Errorf("no contact with %s", host(peerBase))
+	}
+	if !c.Closed {
+		return 0, fmt.Errorf("contact with %s is open: close it first", host(peerBase))
+	}
+	acct := ledger.NodeWalletPrefix + host(peerBase)
+	bal := n.led.Balance(acct)
+	if bal <= 0 {
+		return 0, nil
+	}
+	if _, err := n.led.Append(ledger.Tx{
+		ID: newID(), Type: ledger.TxReserveRetire, Created: n.clock().Format(time.RFC3339),
+		Entries: []ledger.Entry{{Account: acct, Amount: -bal}, {Account: ledger.AcctIssuance, Amount: bal}},
+	}); err != nil {
+		return 0, err
+	}
+	return bal, n.persistLocked()
+}

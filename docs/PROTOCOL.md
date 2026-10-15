@@ -491,7 +491,9 @@ way to make that easy and auditable.
   (membrane: listed so log readers can name them): `issuance.burn` (a balance
   returned to issuance when a member leaves, shrinking the supply) and
   `fund.redistribute` (a fund paid out equally to active members with the next
-  dividend).
+  dividend), and `reserve.retire` (on a closed contact whose peer is gone for
+  good, the reserve held for it returned to issuance: our own currency, which it
+  can no longer spend).
 
 ### 9.2 The log
 

@@ -39,6 +39,9 @@ const (
 	// supply shrinks; fund.redistribute pays a fund out to members.
 	TxIssuanceBurn  = "issuance.burn"
 	TxFundRedistrib = "fund.redistribute"
+	// reserve.retire: a closed contact's reserve, held for a peer that is gone
+	// for good, returned to issuance (its own currency, never to be spent).
+	TxReserveRetire = "reserve.retire"
 )
 
 // Entry is one leg of a transaction.
