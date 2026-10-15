@@ -113,6 +113,9 @@ func adminAPI(h *Host, db *datastore.Client, token string) http.Handler {
 		if err != nil {
 			return nil, err
 		}
+		if n.MemberKnown(in.Member) && !n.MemberActive(in.Member) { // rejoining (96i)
+			return map[string]bool{"ok": true, "rejoined": true}, n.Reactivate(in.Member)
+		}
 		return map[string]bool{"ok": true}, n.AddMember(in.Member, "", 0)
 	}))
 	// GET ?gid=&member=: balance (micro-units) and the current dividend.

@@ -111,6 +111,13 @@ func TestAdminAPI(t *testing.T) {
 	if code, _ := call("POST", "/lp/admin/leave", `{"gid":"barreiro","member":"u1111111111111111","mode":"destroy"}`, "tok"); code != 400 {
 		t.Fatal("left twice")
 	}
+	// Rejoining reactivates the same member; joining twice while active fails.
+	if out := ok("POST", "/lp/admin/member", `{"gid":"barreiro","member":"u1111111111111111"}`); out["rejoined"] != true || !h.Group("barreiro").MemberActive("u1111111111111111") {
+		t.Fatalf("rejoin: %v", out)
+	}
+	if code, _ := call("POST", "/lp/admin/member", `{"gid":"barreiro","member":"u1111111111111111"}`, "tok"); code != 400 {
+		t.Fatal("joined twice while active")
+	}
 	if code, _ := call("POST", "/lp/admin/move", `{"from_gid":"barreiro","member":"u3333333333333333","to_gid":"arnhem","to":"nobody"}`, "tok"); code != 400 {
 		t.Fatal("moved to an account that doesn't exist")
 	}
