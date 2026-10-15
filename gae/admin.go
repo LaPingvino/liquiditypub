@@ -229,6 +229,58 @@ func adminAPI(h *Host, db *datastore.Client, token string) http.Handler {
 		}
 		return map[string]int64{"amount": amount, "dst": dst}, nil
 	}))
+	// POST {gid, member, mode: destroy|redistribute|give|keep, to?}: leave a
+	// group; the balance goes as chosen, then no more dividend.
+	mux.HandleFunc("POST /lp/admin/leave", auth(func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var in struct{ Gid, Member, Mode, To string }
+		if err := body(r, &in); err != nil {
+			return nil, err
+		}
+		n, err := group(in.Gid)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]bool{"ok": true}, n.Leave(in.Member, in.Mode, in.To)
+	}))
+	// POST {from_gid, member, to_gid, to}: move to another group: the whole
+	// balance through the pool to your account there, then leave. Waits for
+	// the transfer to settle (in process: milliseconds); if it doesn't, you
+	// stay a member with your balance.
+	mux.HandleFunc("POST /lp/admin/move", auth(func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var in struct {
+			FromGid string `json:"from_gid"`
+			Member  string
+			ToGid   string `json:"to_gid"`
+			To      string
+		}
+		if err := body(r, &in); err != nil {
+			return nil, err
+		}
+		a, err := group(in.FromGid)
+		if err != nil {
+			return nil, err
+		}
+		b, err := group(in.ToGid)
+		if err != nil {
+			return nil, err
+		}
+		if !b.MemberActive(in.To) {
+			return nil, fmt.Errorf("no account %q in %s yet", in.To, in.ToGid)
+		}
+		moved := a.Balance(ledger.MemberPrefix + in.Member)
+		if moved > 0 {
+			id, err := a.StartTransfer(h.Base(in.ToGid), in.Member+"@"+a.Host(), in.To+"@"+b.Host(), moved, "")
+			if err != nil {
+				return nil, err
+			}
+			for end := time.Now().Add(20 * time.Second); a.TransferState(id) != "SETTLED"; time.Sleep(20 * time.Millisecond) {
+				if time.Now().After(end) {
+					return nil, fmt.Errorf("the move didn't settle (state %s); you're still a member", a.TransferState(id))
+				}
+			}
+		}
+		return map[string]int64{"moved": moved}, a.Leave(in.Member, lpnode.LeaveKeep, "")
+	}))
 	return mux
 }
 

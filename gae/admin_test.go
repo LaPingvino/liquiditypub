@@ -96,6 +96,24 @@ func TestAdminAPI(t *testing.T) {
 	if got := h.Group("arnhem").Balance(ledger.MemberPrefix+"u2222222222222222") - before; float64(got) != q["dst"].(float64) {
 		t.Fatalf("the payee got %d, the quote said %v", got, q["dst"])
 	}
+	// Moving: u0a1 moves everything from barreiro to a new account in arnhem.
+	ok("POST", "/lp/admin/member", `{"gid":"arnhem","member":"u0a1b2c3d4e5f6071"}`)
+	mv := ok("POST", "/lp/admin/move", `{"from_gid":"barreiro","member":"u0a1b2c3d4e5f6071","to_gid":"arnhem","to":"u0a1b2c3d4e5f6071"}`)
+	if mv["moved"].(float64) <= 0 || h.Group("barreiro").MemberActive("u0a1b2c3d4e5f6071") || h.Group("barreiro").Balance(ledger.MemberPrefix+"u0a1b2c3d4e5f6071") != 0 {
+		t.Fatalf("move: %v", mv)
+	}
+	if h.Group("arnhem").Balance(ledger.MemberPrefix+"u0a1b2c3d4e5f6071") <= 0 {
+		t.Fatal("nothing arrived in arnhem")
+	}
+	// Leaving: give to the other member; then leaving again fails.
+	ok("POST", "/lp/admin/member", `{"gid":"barreiro","member":"u3333333333333333"}`)
+	ok("POST", "/lp/admin/leave", `{"gid":"barreiro","member":"u1111111111111111","mode":"give","to":"u3333333333333333"}`)
+	if code, _ := call("POST", "/lp/admin/leave", `{"gid":"barreiro","member":"u1111111111111111","mode":"destroy"}`, "tok"); code != 400 {
+		t.Fatal("left twice")
+	}
+	if code, _ := call("POST", "/lp/admin/move", `{"from_gid":"barreiro","member":"u3333333333333333","to_gid":"arnhem","to":"nobody"}`, "tok"); code != 400 {
+		t.Fatal("moved to an account that doesn't exist")
+	}
 	res, err := http.Get(srv.URL + "/lp/g/arnhem/.well-known/liquiditypub")
 	if err != nil || res.StatusCode != 200 {
 		t.Fatalf("group identity: %v %v", res.StatusCode, err)

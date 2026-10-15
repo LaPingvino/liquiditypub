@@ -27,4 +27,6 @@ dividend in the main node and every group. Public reads per group at
 `GET /lp/admin/balance?gid=&member=`, `POST /lp/admin/pay {gid,from,to,amount}`,
 `POST /lp/admin/link {a,b,seed?}`, `POST /lp/admin/transfer {from_gid,from,to_gid,to,amount}`,
 `GET /lp/admin/transfer?gid=&id=`, `GET /lp/admin/links?gid=`, `GET /lp/admin/quote?from_gid=&to_gid=&amount=`
-(what the payee gets, priced by the pool now).
+(what the payee gets, priced by the pool now), `POST /lp/admin/leave {gid,member,mode,to?}`
+(destroy|redistribute|give|keep), `POST /lp/admin/move {from_gid,member,to_gid,to}` (whole balance
+through the pool to your account there, settled, then leave).
