@@ -10,6 +10,12 @@ App Engine service `lp` behind kafumu.com.
   `conformance/vX.Y.Z`); bump `go.mod` after tagging.
 - Deploy: `gcloud app deploy app.yaml --project <project>`.
 
-Not yet: persistence (a Datastore store: ledger records as append-only entities,
-one small state entity with a version check), the node key and admin token in
-Datastore, the daily dividend from cron, and hosting several group nodes.
+State lives in Datastore (namespace `lp`, `dsstore.go`) whenever a project is
+known (`GOOGLE_CLOUD_PROJECT` on App Engine, or `DATASTORE_PROJECT_ID` with the
+emulator): every ledger record its own entity (append-only, written once), the
+rest of the snapshot in chunks under one `LPState` whose version makes the
+process the single writer — a second writer exits and reloads instead of forking
+the ledger. The admin token is made on first start and kept in `LPConfig`.
+Tests against the emulator: `DATASTORE_EMULATOR_HOST=localhost:8432 go test ./gae/`.
+
+Not yet: the daily dividend from cron, and hosting several group nodes.

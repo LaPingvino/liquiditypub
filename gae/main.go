@@ -2,22 +2,20 @@
 // PROTOCOL §12; beads joop-3mu). First user: Kafumu's CoffeeBucks (K$),
 // deployed as the service "lp" behind kafumu.com.
 //
-// Configuration comes from the environment (app.yaml), never secrets:
+// Configuration comes from the environment (app.yaml), never secrets; the
+// node's state, key and admin token live in Datastore (dsstore.go):
 //
 //	LP_BASE      public origin, e.g. https://kafumu.com
 //	LP_NAME      node name
 //	LP_DESC      one-line description
 //	LP_CURRENCY  currency name (CoffeeBucks)
 //	LP_SYMBOL    currency symbol (K$)
+//	LP_NODE_ID   the node's id in Datastore (coffeebucks)
 //	PORT         set by App Engine
-//
-// The admin token and the node key will live in Datastore (next step), so
-// nothing secret is ever in app.yaml or git. Until then the admin API is
-// closed: with no token configured this binary refuses to start the admin
-// surface rather than leave it open (Config.AdminToken empty = open demo API).
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"log"
@@ -25,6 +23,7 @@ import (
 	"os"
 	"time"
 
+	"cloud.google.com/go/datastore"
 	lpnode "github.com/LaPingvino/liquiditypub/node"
 	"github.com/LaPingvino/liquiditypub/node/fed"
 	"github.com/LaPingvino/liquiditypub/node/httpapi"
@@ -39,10 +38,7 @@ func env(k, def string) string {
 
 func main() {
 	base := env("LP_BASE", "http://localhost:"+env("PORT", "8080"))
-	// A random admin token per process until the token lives in Datastore:
-	// the admin API exists but nobody can use it, which is the safe default.
-	tok := make([]byte, 32)
-	rand.Read(tok)
+	nodeID := env("LP_NODE_ID", "coffeebucks")
 	cfg := lpnode.Config{
 		Base:           base,
 		Name:           env("LP_NAME", "CoffeeBucks"),
@@ -53,9 +49,30 @@ func main() {
 		UDPeriod:       "P1D",
 		GenesisUD:      1_000_000,
 		Transparency:   "pseudonymous",
-		AdminToken:     hex.EncodeToString(tok),
 	}
-	n, err := lpnode.NewNode(cfg)
+	var n *lpnode.Node
+	var err error
+	if project := env("GOOGLE_CLOUD_PROJECT", env("DATASTORE_PROJECT_ID", "")); project != "" {
+		// On App Engine (or against the emulator): the node lives in Datastore,
+		// its admin token too; a second writer makes this process exit and
+		// restart from what's stored rather than fork the ledger.
+		ctx := context.Background()
+		db, derr := datastore.NewClient(ctx, project)
+		if derr != nil {
+			log.Fatal(derr)
+		}
+		if cfg.AdminToken, err = adminToken(ctx, db, nodeID); err != nil {
+			log.Fatal(err)
+		}
+		n, err = lpnode.Restore(cfg, exitOnConflict{NewDSStore(db, nodeID)})
+	} else {
+		// Local, no Datastore: in memory, and the admin API closed (a random
+		// token nobody knows).
+		tok := make([]byte, 32)
+		rand.Read(tok)
+		cfg.AdminToken = hex.EncodeToString(tok)
+		n, err = lpnode.NewNode(cfg)
+	}
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -67,4 +84,16 @@ func main() {
 	addr := ":" + env("PORT", "8080")
 	log.Printf("%s (%s) serving at %s, base %s", cfg.Name, cfg.CurrencySymbol, addr, base)
 	log.Fatal(http.ListenAndServe(addr, httpapi.Handler(n)))
+}
+
+// exitOnConflict: when another writer saved first, this process's state is
+// stale; exiting lets App Engine start a fresh instance that loads the truth.
+type exitOnConflict struct{ *DSStore }
+
+func (e exitOnConflict) Save(data []byte) error {
+	err := e.DSStore.Save(data)
+	if err == ErrConflict {
+		log.Fatalf("%v: exiting to reload", err)
+	}
+	return err
 }
