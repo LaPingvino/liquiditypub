@@ -300,7 +300,9 @@ func adminAPI(h *Host, db *datastore.Client, token string) http.Handler {
 		if err != nil {
 			return nil, err
 		}
-		return map[string]int64{"amount": amount, "dst": dst}, nil
+		// r_src: the payer-side reserve; amount/(r_src+amount) is how much
+		// worse than the pot's current rate this payment gets (96p).
+		return map[string]int64{"amount": amount, "dst": dst, "r_src": cv.MyReserveOfPeer, "r_dst": cv.PeerReserveOfMe}, nil
 	}))
 	// POST {gid, name?, currency?, symbol?}: rename the group, its currency or
 	// its symbol (any member may: Kafumu checks that); kept in the registry.

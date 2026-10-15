@@ -82,6 +82,9 @@ func TestAdminAPI(t *testing.T) {
 		t.Fatalf("links: %v", links)
 	}
 	q := ok("GET", "/lp/admin/quote?from_gid=barreiro&to_gid=arnhem&amount=100000", "")
+	if q["r_src"].(float64) <= 0 || q["r_dst"].(float64) <= 0 {
+		t.Fatalf("quote without reserves: %v", q)
+	}
 	if q["dst"].(float64) <= 0 || q["dst"].(float64) > 100000 {
 		t.Fatalf("quote at UD parity, a small amount: %v", q)
 	}
