@@ -1,0 +1,13 @@
+# The LiquidityPub node as its own App Engine service. One instance at most:
+# a node is a single writer (PROTOCOL §6.3, §12).
+service: lp
+runtime: go127
+instance_class: F1
+automatic_scaling:
+  max_instances: 1
+  min_instances: 0
+env_variables:
+  LP_BASE: "https://kafumu.com"
+  LP_NAME: "CoffeeBucks"
+  LP_CURRENCY: "CoffeeBucks"
+  LP_SYMBOL: "K$"
