@@ -24,6 +24,9 @@ import (
 type lpGroup struct {
 	Name      string    `datastore:"name,noindex"`
 	CreatedAt time.Time `datastore:"created_at,noindex"`
+	// Renamed by its members (96k); empty = the default.
+	Currency string `datastore:"currency,noindex"`
+	Symbol   string `datastore:"symbol,noindex"`
 }
 
 func groupKey(gid string) *datastore.Key {
@@ -41,9 +44,11 @@ func openGroups(ctx context.Context, db *datastore.Client, h *Host) error {
 		return err
 	}
 	for i, k := range keys {
-		if _, err := h.Open(k.Name, gs[i].Name); err != nil {
+		n, err := h.Open(k.Name, gs[i].Name)
+		if err != nil {
 			return fmt.Errorf("group %s: %w", k.Name, err)
 		}
+		n.SetIdentity("", gs[i].Currency, gs[i].Symbol)
 	}
 	log.Printf("opened %d groups", len(keys))
 	return nil
@@ -232,6 +237,49 @@ func adminAPI(h *Host, db *datastore.Client, token string) http.Handler {
 		}
 		return map[string]int64{"amount": amount, "dst": dst}, nil
 	}))
+	// POST {gid, name?, currency?, symbol?}: rename the group, its currency or
+	// its symbol (any member may: Kafumu checks that); kept in the registry.
+	mux.HandleFunc("POST /lp/admin/rename", auth(func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var in struct{ Gid, Name, Currency, Symbol string }
+		if err := body(r, &in); err != nil {
+			return nil, err
+		}
+		n, err := group(in.Gid)
+		if err != nil {
+			return nil, err
+		}
+		in.Name, in.Currency, in.Symbol = clean(in.Name), clean(in.Currency), clean(in.Symbol)
+		if len([]rune(in.Name)) > 60 || len([]rune(in.Currency)) > 30 || len([]rune(in.Symbol)) > 5 {
+			return nil, fmt.Errorf("too long: name 60, currency 30, symbol 5 characters")
+		}
+		if in.Name == "" && in.Currency == "" && in.Symbol == "" {
+			return nil, fmt.Errorf("nothing to rename")
+		}
+		if db != nil {
+			k := groupKey(in.Gid)
+			if _, err := db.RunInTransaction(r.Context(), func(tx *datastore.Transaction) error {
+				var g lpGroup
+				if err := tx.Get(k, &g); err != nil && err != datastore.ErrNoSuchEntity {
+					return err
+				}
+				if in.Name != "" {
+					g.Name = in.Name
+				}
+				if in.Currency != "" {
+					g.Currency = in.Currency
+				}
+				if in.Symbol != "" {
+					g.Symbol = in.Symbol
+				}
+				_, err := tx.Put(k, &g)
+				return err
+			}); err != nil {
+				return nil, err
+			}
+		}
+		n.SetIdentity(in.Name, in.Currency, in.Symbol)
+		return map[string]bool{"ok": true}, nil
+	}))
 	// POST {gid, member, mode: destroy|redistribute|give|keep, to?}: leave a
 	// group; the balance goes as chosen, then no more dividend.
 	mux.HandleFunc("POST /lp/admin/leave", auth(func(w http.ResponseWriter, r *http.Request) (any, error) {
@@ -314,4 +362,14 @@ func groupReads(h *Host) http.HandlerFunc {
 		r2.URL.Path = "/" + path
 		httpapi.Handler(n).ServeHTTP(w, r2)
 	}
+}
+
+// clean trims a display text and drops control characters.
+func clean(s string) string {
+	return strings.TrimSpace(strings.Map(func(r rune) rune {
+		if r < 32 || r == 127 {
+			return -1
+		}
+		return r
+	}, s))
 }

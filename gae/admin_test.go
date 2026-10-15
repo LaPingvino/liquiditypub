@@ -121,13 +121,21 @@ func TestAdminAPI(t *testing.T) {
 	if code, _ := call("POST", "/lp/admin/move", `{"from_gid":"barreiro","member":"u3333333333333333","to_gid":"arnhem","to":"nobody"}`, "tok"); code != 400 {
 		t.Fatal("moved to an account that doesn't exist")
 	}
+	// Renaming: the group, its currency, its symbol; limits.
+	ok("POST", "/lp/admin/rename", `{"gid":"arnhem","name":"Arnhem Kaffeeklatsch","currency":"Bohnen","symbol":"☕B"}`)
+	if c := h.Group("arnhem").IdentityDoc()["currency"].(map[string]any); c["name"] != "Bohnen" || c["symbol"] != "☕B" {
+		t.Fatalf("renamed currency: %v", c)
+	}
+	if code, _ := call("POST", "/lp/admin/rename", `{"gid":"arnhem","symbol":"TOOLONG"}`, "tok"); code != 400 {
+		t.Fatal("a 7-character symbol was accepted")
+	}
 	res, err := http.Get(srv.URL + "/lp/g/arnhem/.well-known/liquiditypub")
 	if err != nil || res.StatusCode != 200 {
 		t.Fatalf("group identity: %v %v", res.StatusCode, err)
 	}
 	var doc map[string]any
 	json.NewDecoder(res.Body).Decode(&doc)
-	if nd, _ := doc["node"].(map[string]any); nd["base"] != h.Base("arnhem") {
+	if nd, _ := doc["node"].(map[string]any); nd["base"] != h.Base("arnhem") || nd["name"] != "Arnhem Kaffeeklatsch" {
 		t.Fatalf("identity doc: %v", doc["node"])
 	}
 	if res, _ := http.Get(srv.URL + "/lp/g/nowhere/.well-known/liquiditypub"); res.StatusCode != 404 {
