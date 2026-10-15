@@ -487,7 +487,11 @@ way to make that easy and auditable.
 - Account id namespaces: `m:<opaque>` members, `node:<host>` peer node wallets,
   `fund:<opaque>` community funds, and the `issuance` / `treasury` system accounts.
 - Transaction types: `issuance.ud`, `issuance.grant`, `payment` (internal),
-  `transfer.out`, `transfer.in`, `reserve.adjust`.
+  `transfer.out`, `transfer.in`, `reserve.adjust`. Reference-node internals
+  (membrane: listed so log readers can name them): `issuance.burn` (a balance
+  returned to issuance when a member leaves, shrinking the supply) and
+  `fund.redistribute` (a fund paid out equally to active members with the next
+  dividend).
 
 ### 9.2 The log
 

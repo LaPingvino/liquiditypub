@@ -260,6 +260,11 @@ func (n *Node) RunUD() (int64, error) {
 			return 0, err
 		}
 	}
+	// What leaving members chose to share out goes with this dividend.
+	if err := n.redistributeLocked(now); err != nil {
+		n.mu.Unlock()
+		return 0, err
+	}
 	n.currentUD = n.computeUDBase()
 	_ = n.persistLocked()
 	n.mu.Unlock()

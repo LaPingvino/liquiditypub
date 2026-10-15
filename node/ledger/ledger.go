@@ -34,6 +34,11 @@ const (
 	TxTransferIn    = "transfer.in"
 	TxReserveAdjust = "reserve.adjust"
 	TxSeed          = "contact.seed"
+	// Node-internal (the membrane principle: peers see only their effect on
+	// published totals). issuance.burn returns a balance to issuance, so the
+	// supply shrinks; fund.redistribute pays a fund out to members.
+	TxIssuanceBurn  = "issuance.burn"
+	TxFundRedistrib = "fund.redistribute"
 )
 
 // Entry is one leg of a transaction.

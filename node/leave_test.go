@@ -1,0 +1,93 @@
+package lpnode
+
+import (
+	"testing"
+
+	"github.com/LaPingvino/liquiditypub/node/ledger"
+)
+
+func leaveNode(t *testing.T) *Node {
+	t.Helper()
+	n, err := NewNode(Config{Base: "https://leave.test", Name: "L", CurrencyName: "C", CurrencySymbol: "C",
+		CPeriodPpm: 274, UDPeriod: "P1D", GenesisUD: 1_000_000,
+		Members: []MemberConfig{{Name: "ana", Grant: 9_000_000}, {Name: "bea", Grant: 1_000_000}, {Name: "cai", Grant: 1_000_000}, {Name: "dan", Grant: 1_000_000}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func bal(n *Node, m string) int64 { return n.Balance(ledger.MemberPrefix + m) }
+
+// Leaving: destroy shrinks the supply; give and redistribute keep it; the
+// next dividend shares the fund out equally; nobody leaves twice; the chain
+// and conservation hold throughout.
+func TestLeave(t *testing.T) {
+	n := leaveNode(t)
+	supply := n.Ledger().MoneySupply()
+
+	if err := n.Leave("dan", LeaveDestroy, ""); err != nil {
+		t.Fatal(err)
+	}
+	if n.MemberActive("dan") || bal(n, "dan") != 0 || n.Ledger().MoneySupply() != supply-1_000_000 {
+		t.Fatalf("destroy: active %v, balance %d, supply %d (was %d)", n.MemberActive("dan"), bal(n, "dan"), n.Ledger().MoneySupply(), supply)
+	}
+	supply = n.Ledger().MoneySupply()
+
+	if err := n.Leave("cai", LeaveGive, "bea"); err != nil {
+		t.Fatal(err)
+	}
+	if bal(n, "bea") != 2_000_000 || bal(n, "cai") != 0 || n.Ledger().MoneySupply() != supply {
+		t.Fatalf("give: bea %d, cai %d", bal(n, "bea"), bal(n, "cai"))
+	}
+	if err := n.Leave("bea", LeaveGive, "cai"); err == nil {
+		t.Fatal("gave to someone who left")
+	}
+
+	if err := n.Leave("ana", LeaveRedistribute, ""); err != nil {
+		t.Fatal(err)
+	}
+	if n.Balance(FundRedistribute) != 9_000_000 || n.Ledger().MoneySupply() != supply {
+		t.Fatalf("redistribute: fund %d", n.Balance(FundRedistribute))
+	}
+	beaBefore := bal(n, "bea")
+	ud, err := n.RunUD()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// bea is the only active member left: the dividend plus the whole fund.
+	if got := bal(n, "bea") - beaBefore; got != ud+9_000_000 || n.Balance(FundRedistribute) != 0 {
+		t.Fatalf("after the dividend bea got %d (ud %d), fund %d", got, ud, n.Balance(FundRedistribute))
+	}
+	if bal(n, "ana") != 0 || bal(n, "dan") != 0 {
+		t.Fatal("someone who left got the dividend")
+	}
+
+	for _, m := range []string{"ana", "nobody"} {
+		if err := n.Leave(m, LeaveKeep, ""); err == nil {
+			t.Fatalf("%s left again", m)
+		}
+	}
+	if err := n.Leave("bea", "vanish", ""); err == nil {
+		t.Fatal("an unknown mode was accepted")
+	}
+	if err := n.Ledger().VerifyChain(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The fund's remainder stays for the next time rather than being lost.
+func TestRedistributeRemainder(t *testing.T) {
+	n := leaveNode(t)
+	n.Pay("ana", "dan", 1) // dan: 1_000_001
+	if err := n.Leave("dan", LeaveRedistribute, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := n.RunUD(); err != nil {
+		t.Fatal(err)
+	}
+	// 1_000_001 over three active members: 333_333 each, 2 left in the fund.
+	if n.Balance(FundRedistribute) != 2 {
+		t.Fatalf("remainder %d", n.Balance(FundRedistribute))
+	}
+}
