@@ -83,7 +83,26 @@ func main() {
 
 	addr := ":" + env("PORT", "8080")
 	log.Printf("%s (%s) serving at %s, base %s", cfg.Name, cfg.CurrencySymbol, addr, base)
-	log.Fatal(http.ListenAndServe(addr, httpapi.Handler(n)))
+	mux := http.NewServeMux()
+	// The daily dividend (PROTOCOL §10: issuance is driven by a scheduler,
+	// never by request handling): App Engine cron calls this; the header is
+	// set only by cron (App Engine strips it from outside requests).
+	mux.HandleFunc("/cron/ud", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Appengine-Cron") != "true" {
+			http.NotFound(w, r)
+			return
+		}
+		issued, err := n.RunUD()
+		if err != nil {
+			log.Printf("ud: %v", err)
+			http.Error(w, "ud failed", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("ud: issued %d micro-units", issued)
+		w.Write([]byte("ok\n"))
+	})
+	mux.Handle("/", httpapi.Handler(n))
+	log.Fatal(http.ListenAndServe(addr, mux))
 }
 
 // exitOnConflict: when another writer saved first, this process's state is
