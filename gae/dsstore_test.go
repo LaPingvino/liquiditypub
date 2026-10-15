@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"cloud.google.com/go/datastore"
 	lpnode "github.com/LaPingvino/liquiditypub/node"
 	"github.com/LaPingvino/liquiditypub/node/ledger"
+	"github.com/LaPingvino/liquiditypub/node/store"
 )
 
 // Runs only against the Datastore emulator:
@@ -103,5 +105,51 @@ func TestAdminTokenKept(t *testing.T) {
 	}
 	if b, _ := adminToken(context.Background(), db, id); b != a {
 		t.Fatal("a second start made a new token")
+	}
+}
+
+// The sweep (96m): a group empty for more than 90 days goes with all its
+// stored state; one empty for less stays; one someone came back to stays.
+func TestSweepGroups(t *testing.T) {
+	db := emulator(t)
+	ctx := context.Background()
+	suffix := fmt.Sprint(os.Getpid())
+	h := NewHost("g.kafumu.test", func(id string) store.Store { return NewDSStore(db, id) }, groupCfg)
+	old, recent := "old-"+suffix, "new-"+suffix
+	for _, g := range []struct {
+		gid   string
+		since time.Time
+	}{{old, time.Now().Add(-100 * 24 * time.Hour)}, {recent, time.Now().Add(-10 * 24 * time.Hour)}} {
+		n, err := h.Open(g.gid, g.gid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n.AddMember("ana", "", 0)
+		n.RunUD()
+		n.Leave("ana", lpnode.LeaveKeep, "")
+		if _, err := db.Put(ctx, groupKey(g.gid), &lpGroup{Name: g.gid, EmptySince: g.since}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gone, err := sweepGroups(ctx, db, h, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gone != 1 || h.Group(old) != nil || h.Group(recent) == nil {
+		t.Fatalf("gone %d; old on host %v, recent on host %v", gone, h.Group(old) != nil, h.Group(recent) != nil)
+	}
+	var st lpState
+	if err := db.Get(ctx, NewDSStore(db, "g-"+old).stateKey(), &st); err != datastore.ErrNoSuchEntity {
+		t.Fatalf("old group's state still stored: %v", err)
+	}
+	if err := db.Get(ctx, NewDSStore(db, "g-"+old).recordKey(0), &lpBlob{}); err != datastore.ErrNoSuchEntity {
+		t.Fatalf("old group's ledger still stored: %v", err)
+	}
+	var g lpGroup
+	if err := db.Get(ctx, groupKey(old), &g); err != datastore.ErrNoSuchEntity {
+		t.Fatal("old group still registered")
+	}
+	if err := db.Get(ctx, NewDSStore(db, "g-"+recent).stateKey(), &st); err != nil {
+		t.Fatalf("recent group lost its state: %v", err)
 	}
 }

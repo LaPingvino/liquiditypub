@@ -160,3 +160,33 @@ func (s inproc) FetchCheckpoint(peerBase string) (map[string]any, error) {
 	}
 	return n.Checkpoint(), nil
 }
+
+// Remove takes a group off this host for good (90 days with nobody in it,
+// 96m): its links close on both sides and every linked group retires the
+// reserve it held for it (its own currency, which the gone group can't
+// spend); then the group is no longer reachable. Its stored state is the
+// caller's to delete.
+func (h *Host) Remove(gid string) error {
+	d := h.Group(gid)
+	if d == nil {
+		return fmt.Errorf("no group %q", gid)
+	}
+	for _, other := range h.Groups() {
+		o := h.Group(other)
+		if other == gid || o == nil {
+			continue
+		}
+		if _, ok := o.ContactByPeer(h.Base(gid)); !ok {
+			continue
+		}
+		_ = d.CloseContact(h.Base(other), "group deleted")
+		_ = o.CloseContact(h.Base(gid), "group deleted")
+		if _, err := o.RetireReserve(h.Base(gid)); err != nil {
+			return fmt.Errorf("%s: retire the reserve for %s: %w", other, gid, err)
+		}
+	}
+	h.mu.Lock()
+	delete(h.nodes, gid+"."+h.groupDomain)
+	h.mu.Unlock()
+	return nil
+}

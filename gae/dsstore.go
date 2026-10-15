@@ -239,3 +239,29 @@ func adminToken(ctx context.Context, db *datastore.Client, node string) (string,
 	})
 	return c.AdminToken, err
 }
+
+// Delete removes everything stored for this node (a deleted group, 96m).
+func (s *DSStore) Delete(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var st lpState
+	if err := s.db.Get(ctx, s.stateKey(), &st); err == datastore.ErrNoSuchEntity {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	var keys []*datastore.Key
+	for i := 0; i < st.Records; i++ {
+		keys = append(keys, s.recordKey(i))
+	}
+	for i := 0; i < st.Chunks; i++ {
+		keys = append(keys, s.chunkKey(i))
+	}
+	keys = append(keys, s.stateKey())
+	for i := 0; i < len(keys); i += putBatch {
+		if err := s.db.DeleteMulti(ctx, keys[i:min(i+putBatch, len(keys))]); err != nil {
+			return err
+		}
+	}
+	return nil
+}

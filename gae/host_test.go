@@ -182,3 +182,40 @@ func TestHostConcurrentCrossPayments(t *testing.T) {
 	}
 	t.Logf("%d payments started, %d settled, %d ops on the channel", len(ids), settled, ca.OpSeq)
 }
+
+// Removing a group nobody's in (96m): its links close, the linked group
+// retires the reserve it held for it (its supply shrinks by exactly that),
+// both chains verify, and the group is gone from the host.
+func TestHostRemove(t *testing.T) {
+	h := NewHost("g.kafumu.test", func(string) store.Store { return store.Nop{} }, groupCfg)
+	a, _ := h.Open("gone", "Gone")
+	b, _ := h.Open("stays", "Stays")
+	b.AddMember("bea", "", 0)
+	if err := h.Link("gone", "stays", 100_000_000); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the link", func() bool { return a.ContactActive(h.Base("stays")) && b.ContactActive(h.Base("gone")) })
+	held := b.Balance(ledger.NodeWalletPrefix + a.Host())
+	supply := b.Ledger().MoneySupply()
+	if held <= 0 {
+		t.Fatalf("stays holds %d for gone", held)
+	}
+	if err := h.Remove("gone"); err != nil {
+		t.Fatal(err)
+	}
+	if h.Group("gone") != nil {
+		t.Fatal("still on the host")
+	}
+	if b.Balance(ledger.NodeWalletPrefix+a.Host()) != 0 || b.Ledger().MoneySupply() != supply-held {
+		t.Fatalf("reserve not retired: wallet %d, supply %d (was %d, held %d)", b.Balance(ledger.NodeWalletPrefix+a.Host()), b.Ledger().MoneySupply(), supply, held)
+	}
+	if b.ContactActive(h.Base("gone")) {
+		t.Fatal("the link is still open")
+	}
+	if err := b.Ledger().VerifyChain(); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Remove("gone"); err == nil {
+		t.Fatal("removed twice")
+	}
+}

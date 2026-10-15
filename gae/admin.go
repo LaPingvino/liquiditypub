@@ -27,6 +27,70 @@ type lpGroup struct {
 	// Renamed by its members (96k); empty = the default.
 	Currency string `datastore:"currency,noindex"`
 	Symbol   string `datastore:"symbol,noindex"`
+	// EmptySince: when its last member left (zero while anyone is in it);
+	// 90 days later the group is deleted (96m).
+	EmptySince time.Time `datastore:"empty_since"`
+}
+
+// GroupGrace is how long a group with nobody in it waits for someone to
+// come back with an invite before it is deleted.
+const GroupGrace = 90 * 24 * time.Hour
+
+// markEmpty records whether a group has anyone in it (after a leave or a join).
+func markEmpty(ctx context.Context, db *datastore.Client, gid string, n *lpnode.Node) {
+	if db == nil {
+		return
+	}
+	empty := n.ActiveMembers() == 0
+	k := groupKey(gid)
+	db.RunInTransaction(ctx, func(tx *datastore.Transaction) error {
+		var g lpGroup
+		if err := tx.Get(k, &g); err != nil {
+			return err
+		}
+		switch {
+		case empty && g.EmptySince.IsZero():
+			g.EmptySince = time.Now().UTC()
+		case !empty && !g.EmptySince.IsZero():
+			g.EmptySince = time.Time{}
+		default:
+			return nil
+		}
+		_, err := tx.Put(k, &g)
+		return err
+	})
+}
+
+// sweepGroups deletes groups that have had nobody in them for GroupGrace:
+// links closed and reserves retired (Host.Remove), then their stored state
+// and registry entry. Returns how many went.
+func sweepGroups(ctx context.Context, db *datastore.Client, h *Host, now time.Time) (int, error) {
+	var gs []lpGroup
+	keys, err := db.GetAll(ctx, datastore.NewQuery("LPGroup").Namespace(ns).FilterField("empty_since", ">", time.Time{}).FilterField("empty_since", "<", now.Add(-GroupGrace)), &gs)
+	if err != nil {
+		return 0, err
+	}
+	gone := 0
+	for _, k := range keys {
+		gid := k.Name
+		if n := h.Group(gid); n != nil && n.ActiveMembers() > 0 { // someone came back meanwhile
+			continue
+		}
+		if h.Group(gid) != nil {
+			if err := h.Remove(gid); err != nil {
+				return gone, err
+			}
+		}
+		if err := NewDSStore(db, "g-"+gid).Delete(ctx); err != nil {
+			return gone, err
+		}
+		if err := db.Delete(ctx, k); err != nil {
+			return gone, err
+		}
+		log.Printf("group %s deleted: nobody in it for %s", gid, GroupGrace)
+		gone++
+	}
+	return gone, nil
 }
 
 func groupKey(gid string) *datastore.Key {
@@ -118,6 +182,7 @@ func adminAPI(h *Host, db *datastore.Client, token string) http.Handler {
 		if err != nil {
 			return nil, err
 		}
+		defer markEmpty(r.Context(), db, in.Gid, n)
 		if n.MemberKnown(in.Member) && !n.MemberActive(in.Member) { // rejoining (96i)
 			return map[string]bool{"ok": true, "rejoined": true}, n.Reactivate(in.Member)
 		}
@@ -291,6 +356,7 @@ func adminAPI(h *Host, db *datastore.Client, token string) http.Handler {
 		if err != nil {
 			return nil, err
 		}
+		defer markEmpty(r.Context(), db, in.Gid, n)
 		return map[string]bool{"ok": true}, n.Leave(in.Member, in.Mode, in.To)
 	}))
 	// POST {from_gid, member, to_gid, to}: move to another group: the whole
@@ -330,6 +396,8 @@ func adminAPI(h *Host, db *datastore.Client, token string) http.Handler {
 				}
 			}
 		}
+		defer markEmpty(r.Context(), db, in.FromGid, a)
+		defer markEmpty(r.Context(), db, in.ToGid, b)
 		return map[string]int64{"moved": moved}, a.Leave(in.Member, lpnode.LeaveKeep, "")
 	}))
 	return mux

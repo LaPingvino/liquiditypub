@@ -122,6 +122,13 @@ func main() {
 			http.Error(w, "ud failed", http.StatusInternalServerError)
 			return
 		}
+		if db != nil {
+			if gone, err := sweepGroups(r.Context(), db, h, time.Now()); err != nil {
+				log.Printf("sweep groups: %v", err)
+			} else if gone > 0 {
+				log.Printf("sweep groups: %d deleted", gone)
+			}
+		}
 		log.Printf("ud: issued %d micro-units; %d groups", issued, groups)
 		w.Write([]byte("ok\n"))
 	})
