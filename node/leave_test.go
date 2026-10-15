@@ -26,8 +26,17 @@ func TestLeave(t *testing.T) {
 	n := leaveNode(t)
 	supply := n.Ledger().MoneySupply()
 
+	if n.ActiveMembers() != 4 {
+		t.Fatalf("active %d", n.ActiveMembers())
+	}
 	if err := n.Leave("dan", LeaveDestroy, ""); err != nil {
 		t.Fatal(err)
+	}
+	if n.ActiveMembers() != 3 {
+		t.Fatal("someone who left still counts as active")
+	}
+	if st := n.IdentityDoc()["stats"].(map[string]any); st["active_members"] != int64(3) {
+		t.Fatalf("identity doc active_members = %v, want 3 (PROTOCOL §3: peers price dilution from it)", st["active_members"])
 	}
 	if n.MemberActive("dan") || bal(n, "dan") != 0 || n.Ledger().MoneySupply() != supply-1_000_000 {
 		t.Fatalf("destroy: active %v, balance %d, supply %d (was %d)", n.MemberActive("dan"), bal(n, "dan"), n.Ledger().MoneySupply(), supply)

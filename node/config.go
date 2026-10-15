@@ -123,7 +123,7 @@ func (n *Node) IdentityDoc() map[string]any {
 		"transparency": n.cfg.Transparency,
 		"peers":        n.peerList(),
 		"stats": map[string]any{
-			"active_members":  int64(len(n.members)),
+			"active_members":  n.activeCountLocked(),
 			"ud_weight_total": n.udWeightTotal(),
 			"money_supply":    n.led.MoneySupply(),
 		},

@@ -91,3 +91,20 @@ func (n *Node) MemberKnown(name string) bool {
 	defer n.mu.Unlock()
 	return n.members[name] != nil
 }
+
+// ActiveMembers counts the members who get the dividend (left ones don't).
+func (n *Node) ActiveMembers() int64 {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.activeCountLocked()
+}
+
+func (n *Node) activeCountLocked() int64 {
+	var c int64
+	for _, m := range n.members {
+		if m.Active {
+			c++
+		}
+	}
+	return c
+}
